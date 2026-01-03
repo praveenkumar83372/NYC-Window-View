@@ -3,7 +3,7 @@ name: NYC Window View 24-7
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */6 * * *' # Restarts every 6 hours for stability
+    - cron: '0 */6 * * *'
 
 jobs:
   stream:
@@ -12,13 +12,10 @@ jobs:
       - name: 1. Checkout Code
         uses: actions/checkout@v3
 
-      - name: 2. Install Python and Dependencies
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.9'
-      
-      - name: Install Requirements
+      - name: 2. Install FFmpeg and Dependencies
         run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
           pip install supabase requests
 
       - name: 3. Build Vertical Playlist
@@ -34,7 +31,6 @@ jobs:
           key = os.environ.get("SUPABASE_KEY")
           supabase = create_client(url, key)
           
-          # Get all videos from the 'playlist' table
           response = supabase.table("playlist").select("url").execute()
           
           if not response.data:
@@ -43,7 +39,6 @@ jobs:
               
           with open("playlist.txt", "w") as f:
               for row in response.data:
-                  # FFmpeg needs this specific format for concatenating files
                   f.write(f"file '{row['url']}'\n")
           EOF
 
