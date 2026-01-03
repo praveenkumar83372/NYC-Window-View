@@ -12,13 +12,13 @@ jobs:
       - name: 1. Checkout Code
         uses: actions/checkout@v3
 
-      - name: 2. Install FFmpeg and Dependencies
+      - name: 2. Install FFmpeg
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
           pip install supabase requests
 
-      - name: 3. Build Vertical Playlist
+      - name: 3. Build Playlist
         env:
           SUPABASE_URL: "https://ofqbyabbjpincectjdya.supabase.co"
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -26,30 +26,26 @@ jobs:
           python - <<EOF
           import os
           from supabase import create_client
-          
           url = os.environ.get("SUPABASE_URL")
           key = os.environ.get("SUPABASE_KEY")
           supabase = create_client(url, key)
-          
           response = supabase.table("playlist").select("url").execute()
-          
           if not response.data:
-              print("No videos found!")
               exit(1)
-              
           with open("playlist.txt", "w") as f:
               for row in response.data:
                   f.write(f"file '{row['url']}'\n")
           EOF
 
-      - name: 4. The 2026 "Zero-Buzz" FFmpeg Command
+      - name: 4. The 2026 "Perfect Sync" Command
         run: |
-          # 1. We use '-copyts' to keep the timing from the original file
-          # 2. We use 'libmp3lame' because it handles errors better than AAC
-          # 3. We use 'asetpts=N/SR/TB' to rebuild the audio clock from scratch
+          # The fix: 
+          # 1. '-use_wallclock_as_timestamps 1' forces the audio to real-time.
+          # 2. '-af "aresample=44100,asettb=1/44100,asetpts=N/SR/TB"' rebuilds the heart of the audio stream.
           ffmpeg -re -stream_loop -1 -f concat -safe 0 -protocol_whitelist file,http,https,tcp,tls -i playlist.txt \
+          -use_wallclock_as_timestamps 1 \
           -vcodec libx264 -preset veryfast -tune zerolatency -b:v 2500k -maxrate 2500k -bufsize 5000k \
           -pix_fmt yuv420p -g 60 -vf "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2" \
-          -acodec libmp3lame -ar 44100 -b:a 128k -ac 2 \
-          -af "asetpts=N/SR/TB,aresample=async=1:min_hard_comp=0.100000:first_pts=0" \
-          -fflags +genpts+igndts -f flv rtmp://a.rtmp.youtube.com/live2/${{ secrets.STREAM_KEY }}
+          -acodec aac -ar 44100 -b:a 128k -ac 2 \
+          -af "aresample=44100:async=1,asettb=1/44100,asetpts=N/SR/TB" \
+          -f flv rtmp://a.rtmp.youtube.com/live2/${{ secrets.STREAM_KEY }}
