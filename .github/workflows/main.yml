@@ -42,12 +42,13 @@ jobs:
                   f.write(f"file '{row['url']}'\n")
           EOF
 
-      - name: 4. The 2026 "Shorts Master" FFmpeg Command
+      - name: 4. The 2026 "Crystal Audio" FFmpeg Command
         run: |
-          # Audio Fix: We use -af "aresample=async=1" to stop the 'door' buzzing sound
-          # Video Fix: We use a specific 'level' and 'profile' for mobile compatibility
+          # FIX: Added -async 1 and -af "aresample=async=1000:min_hard_comp=0.100000:first_pts=0"
+          # This forces the audio to stay perfectly aligned with the clock.
           ffmpeg -re -stream_loop -1 -f concat -safe 0 -protocol_whitelist file,http,https,tcp,tls -i playlist.txt \
           -vcodec libx264 -preset veryfast -tune zerolatency -crf 23 -maxrate 2500k -bufsize 5000k \
           -pix_fmt yuv420p -g 60 -vf "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2" \
-          -acodec aac -ar 44100 -b:a 128k -af "aresample=async=1" \
+          -acodec aac -ar 44100 -b:a 128k -ac 2 \
+          -af "aresample=async=1:min_comp=0.001:min_hard_comp=0.100000:first_pts=0" \
           -f flv rtmp://a.rtmp.youtube.com/live2/${{ secrets.STREAM_KEY }}
