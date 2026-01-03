@@ -3,7 +3,7 @@ name: NYC Window View 24-7
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */6 * * *' # Automatically restarts every 6 hours for stability
+    - cron: '0 */6 * * *'
 
 jobs:
   stream:
@@ -31,24 +31,23 @@ jobs:
           key = os.environ.get("SUPABASE_KEY")
           supabase = create_client(url, key)
           
-          # Fetch all video URLs from your Supabase 'playlist' table
           response = supabase.table("playlist").select("url").execute()
           
           if not response.data:
-              print("No videos found in database! Please add one via Telegram first.")
+              print("No videos found!")
               exit(1)
               
           with open("playlist.txt", "w") as f:
               for row in response.data:
-                  # This format is required for FFmpeg's concat demuxer
                   f.write(f"file '{row['url']}'\n")
           EOF
 
-      - name: 4. The 2026 "Vertical Master" FFmpeg Command
+      - name: 4. The 2026 "Shorts Master" FFmpeg Command
         run: |
-          # Settings optimized for YouTube Live "Snap-to-Live" connection
+          # Audio Fix: We use -af "aresample=async=1" to stop the 'door' buzzing sound
+          # Video Fix: We use a specific 'level' and 'profile' for mobile compatibility
           ffmpeg -re -stream_loop -1 -f concat -safe 0 -protocol_whitelist file,http,https,tcp,tls -i playlist.txt \
-          -vcodec libx264 -preset veryfast -tune zerolatency -b:v 2500k -maxrate 2500k -bufsize 5000k \
+          -vcodec libx264 -preset veryfast -tune zerolatency -crf 23 -maxrate 2500k -bufsize 5000k \
           -pix_fmt yuv420p -g 60 -vf "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2" \
-          -acodec aac -ar 44100 -b:a 128k \
+          -acodec aac -ar 44100 -b:a 128k -af "aresample=async=1" \
           -f flv rtmp://a.rtmp.youtube.com/live2/${{ secrets.STREAM_KEY }}
