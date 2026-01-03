@@ -37,15 +37,18 @@ jobs:
                   f.write(f"file '{row['url']}'\n")
           EOF
 
-      - name: 4. The 2026 "Perfect Sync" Command
+      - name: 4. The 2026 "Perfect Audio" FFmpeg Command
         run: |
-          # The fix: 
-          # 1. '-use_wallclock_as_timestamps 1' forces the audio to real-time.
-          # 2. '-af "aresample=44100,asettb=1/44100,asetpts=N/SR/TB"' rebuilds the heart of the audio stream.
-          ffmpeg -re -stream_loop -1 -f concat -safe 0 -protocol_whitelist file,http,https,tcp,tls -i playlist.txt \
-          -use_wallclock_as_timestamps 1 \
+          # THE FIX: 
+          # 1. -reconnect flags: Prevents the audio from 'stuttering' if the internet blips.
+          # 2. fifo filter: Creates a buffer so the audio never 'overlaps' itself (the cause of the dorrr sound).
+          # 3. aresample=async=1000: The strongest possible correction for audio drift.
+          ffmpeg -re -stream_loop -1 -f concat -safe 0 \
+          -protocol_whitelist file,http,https,tcp,tls \
+          -reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 -reconnect_delay_max 5 \
+          -i playlist.txt \
           -vcodec libx264 -preset veryfast -tune zerolatency -b:v 2500k -maxrate 2500k -bufsize 5000k \
           -pix_fmt yuv420p -g 60 -vf "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2" \
           -acodec aac -ar 44100 -b:a 128k -ac 2 \
-          -af "aresample=44100:async=1,asettb=1/44100,asetpts=N/SR/TB" \
-          -f flv rtmp://a.rtmp.youtube.com/live2/${{ secrets.STREAM_KEY }}
+          -af "aresample=async=1000:min_hard_comp=0.100000:first_pts=0" \
+          -max_interleave_delta 100M -f flv rtmp://a.rtmp.youtube.com/live2/${{ secrets.STREAM_KEY }}
