@@ -1,43 +1,56 @@
 name: NYC Window View 24-7
+
 on:
+  workflow_dispatch:
   schedule:
     - cron: '0 */6 * * *' # Restarts every 6 hours for stability
-  workflow_dispatch:      # Allows you to click 'Run' manually
 
 jobs:
   stream:
     runs-on: ubuntu-latest
     steps:
-      - name: Install Stream Tools
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg jq curl
+      - name: 1. Checkout Code
+        uses: actions/checkout@v3
 
-      - name: Build Vertical Playlist
+      - name: 2. Install Python and Dependencies
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      
+      - name: Install Requirements
+        run: |
+          pip install supabase requests
+
+      - name: 3. Build Vertical Playlist
         env:
           SUPABASE_URL: "https://ofqbyabbjpincectjdya.supabase.co"
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: |
-          # 1. Get the URLs from your 'playlist' table
-          curl -s "$SUPABASE_URL/rest/v1/playlist?select=url" \
-          -H "apikey: $SUPABASE_KEY" \
-          -H "Authorization: Bearer $SUPABASE_KEY" | jq -r '.[].url' > urls.txt
+          python - <<EOF
+          import os
+          from supabase import create_client
+          
+          url = os.environ.get("SUPABASE_URL")
+          key = os.environ.get("SUPABASE_KEY")
+          supabase = create_client(url, key)
+          
+          # Get all videos from the 'playlist' table
+          response = supabase.table("playlist").select("url").execute()
+          
+          if not response.data:
+              print("No videos found in database!")
+              exit(1)
+              
+          with open("playlist.txt", "w") as f:
+              for row in response.data:
+                  # FFmpeg needs this specific format for concatenating files
+                  f.write(f"file '{row['url']}'\n")
+          EOF
 
-          # 2. Download files and create the ffmpeg text list
-          i=0
-          while read url; do
-            curl -L "$url" -o "clip_$i.mp4"
-            echo "file 'clip_$i.mp4'" >> playlist.txt
-            i=$((i+1))
-          done < urls.txt
-
-      - name: Broadcast to YouTube Shorts Live
-        env:
-          STREAM_KEY: ${{ secrets.STREAM_KEY }}
+      - name: 4. The 2026 "Vertical Master" FFmpeg Command
         run: |
-          # 3. The 2026 "Vertical Master" FFmpeg Command
-          # -vf filters: Force 720:1280 (Vertical), add padding for different sizes, force yuv420p for YT
-          # -g 60: Keyframes every 2 seconds (Required by YouTube)
-          ffmpeg -f concat -safe 0 -i playlist.txt -re -stream_loop -1 \
-          -vf "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2,format=yuv420p" \
-          -vcodec libx264 -preset ultrafast -tune zerolatency -b:v 2500k \
-          -g 60 -acodec aac -b:a 128k -ar 44100 -f flv \
-          rtmp://a.rtmp.youtube.com/live2/$STREAM_KEY
+          ffmpeg -re -f concat -safe 0 -protocol_whitelist file,http,https,tcp,tls -i playlist.txt \
+          -vcodec libx264 -preset veryfast -maxrate 3000k -bufsize 6000k \
+          -pix_fmt yuv420p -g 60 -vf "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2" \
+          -acodec aac -ar 44100 -b:a 128k \
+          -f flv rtmp://a.rtmp.youtube.com/live2/${{ secrets.STREAM_KEY }}
