@@ -37,11 +37,10 @@ jobs:
                   f.write(f"file '{row['url']}'\n")
           EOF
 
-      - name: 4. The 2026 "No-Buzz" FFmpeg Command
+      - name: 4. The 2026 "Instant-Live" Command
         run: |
-          # 1. Moved reconnect flags BEFORE the input (-i)
-          # 2. Added 'aresample=async=1' and 'dr' (drop) to force real-time audio
-          # 3. Added -fflags +genpts to rebuild the timing markers
+          # Added -flvflags no_duration_filesize to fix 'Preparing Stream' hang
+          # Added -metadata:s:v:0 rotate=0 to force vertical alignment
           ffmpeg -re -stream_loop -1 \
           -f concat -safe 0 -protocol_whitelist file,http,https,tcp,tls \
           -i playlist.txt \
@@ -49,4 +48,5 @@ jobs:
           -pix_fmt yuv420p -g 60 -vf "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2" \
           -acodec aac -ar 44100 -b:a 128k -ac 2 \
           -af "aresample=44100:async=100:min_hard_comp=0.1" \
-          -fflags +genpts+igndts -f flv rtmp://a.rtmp.youtube.com/live2/${{ secrets.STREAM_KEY }}
+          -fflags +genpts+igndts -flvflags no_duration_filesize \
+          -f flv rtmp://a.rtmp.youtube.com/live2/${{ secrets.STREAM_KEY }}
