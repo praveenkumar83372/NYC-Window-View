@@ -1,0 +1,46 @@
+import telebot
+import requests
+
+# 1. YOUR CREDENTIALS
+SUPABASE_URL = "https://ofqbyabbjpincectjdya.supabase.co"
+SUPABASE_KEY = "sb_publishable_y4EN0CeCLGkenpubyf4tcg_8vj4PVcn"  # Use the long 'eyJ...' key
+BOT_TOKEN = "8388212435:AAHuhQ7XSf4eJKxswzyW0yk5ALEYV-x4I7U"
+
+bot = telebot.TeleBot(BOT_TOKEN)
+
+@bot.message_handler(content_types=['video'])
+def handle_video(message):
+    bot.reply_to(message, "🗽 NYC Window View: Sending to Cloud...")
+    
+    # Download from Telegram
+    file_info = bot.get_file(message.video.file_id)
+    file_url = f"https://api.telegram.org/file/bot{bot.token}/{file_info.file_path}"
+    video_data = requests.get(file_url).content
+    
+    # Upload to Supabase Storage (Bucket: nyc-videos)
+    file_path = f"shorts/{message.video.file_id}.mp4"
+    storage_url = f"{SUPABASE_URL}/storage/v1/object/nyc-videos/{file_path}"
+    
+    headers = {
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "apikey": SUPABASE_KEY,
+        "Content-Type": "video/mp4"
+    }
+    
+    # Send the video file
+    upload_res = requests.post(storage_url, headers=headers, data=video_data)
+    
+    if upload_res.status_code == 200:
+        # Get the link we just created
+        public_url = f"{SUPABASE_URL}/storage/v1/object/public/nyc-videos/{file_path}"
+        
+        # Save link to the 'playlist' table
+        db_url = f"{SUPABASE_URL}/rest/v1/playlist"
+        requests.post(db_url, headers=headers, json={"url": public_url})
+        
+        bot.reply_to(message, "✅ Successfully added to the 24/7 loop!")
+    else:
+        bot.reply_to(message, f"❌ Error: {upload_res.text}")
+
+print("NYC Window View Bot is listening...")
+bot.polling()

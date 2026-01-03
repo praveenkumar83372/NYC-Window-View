@@ -1,0 +1,43 @@
+name: NYC Window View 24-7
+on:
+  schedule:
+    - cron: '0 */6 * * *' # Restarts every 6 hours for stability
+  workflow_dispatch:      # Allows you to click 'Run' manually
+
+jobs:
+  stream:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Stream Tools
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg jq curl
+
+      - name: Build Vertical Playlist
+        env:
+          SUPABASE_URL: "https://ofqbyabbjpincectjdya.supabase.co"
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: |
+          # 1. Get the URLs from your 'playlist' table
+          curl -s "$SUPABASE_URL/rest/v1/playlist?select=url" \
+          -H "apikey: $SUPABASE_KEY" \
+          -H "Authorization: Bearer $SUPABASE_KEY" | jq -r '.[].url' > urls.txt
+
+          # 2. Download files and create the ffmpeg text list
+          i=0
+          while read url; do
+            curl -L "$url" -o "clip_$i.mp4"
+            echo "file 'clip_$i.mp4'" >> playlist.txt
+            i=$((i+1))
+          done < urls.txt
+
+      - name: Broadcast to YouTube Shorts Live
+        env:
+          STREAM_KEY: ${{ secrets.STREAM_KEY }}
+        run: |
+          # 3. The 2026 "Vertical Master" FFmpeg Command
+          # -vf filters: Force 720:1280 (Vertical), add padding for different sizes, force yuv420p for YT
+          # -g 60: Keyframes every 2 seconds (Required by YouTube)
+          ffmpeg -f concat -safe 0 -i playlist.txt -re -stream_loop -1 \
+          -vf "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2,format=yuv420p" \
+          -vcodec libx264 -preset ultrafast -tune zerolatency -b:v 2500k \
+          -g 60 -acodec aac -b:a 128k -ar 44100 -f flv \
+          rtmp://a.rtmp.youtube.com/live2/$STREAM_KEY
