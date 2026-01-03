@@ -37,16 +37,17 @@ jobs:
                   f.write(f"file '{row['url']}'\n")
           EOF
 
-      - name: 4. The 2026 "Instant-Live" Command
+      - name: 4. The 2026 "Seamless" FFmpeg Command
         run: |
-          # Added -flvflags no_duration_filesize to fix 'Preparing Stream' hang
-          # Added -metadata:s:v:0 rotate=0 to force vertical alignment
-          ffmpeg -re -stream_loop -1 \
-          -f concat -safe 0 -protocol_whitelist file,http,https,tcp,tls \
-          -i playlist.txt \
+          # The "Dorrr" Killer Strategy:
+          # 1. -safe 0 and concat demuxer with -fflags +genpts
+          # 2. -af "aresample=async=1:first_pts=0" forces the transition to be silent if it fails, instead of buzzing.
+          # 3. -correct_ts_overflow 0 prevents the 'dorrr' after long playtimes.
+          ffmpeg -re -stream_loop -1 -f concat -safe 0 -protocol_whitelist file,http,https,tcp,tls -i playlist.txt \
           -vcodec libx264 -preset veryfast -tune zerolatency -b:v 2500k -maxrate 2500k -bufsize 5000k \
           -pix_fmt yuv420p -g 60 -vf "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2" \
           -acodec aac -ar 44100 -b:a 128k -ac 2 \
-          -af "aresample=44100:async=100:min_hard_comp=0.1" \
-          -fflags +genpts+igndts -flvflags no_duration_filesize \
+          -af "aresample=44100:async=1:min_hard_comp=0.100000:first_pts=0" \
+          -fflags +genpts+igndts+flush_packets \
+          -correct_ts_overflow 0 -flvflags no_duration_filesize \
           -f flv rtmp://a.rtmp.youtube.com/live2/${{ secrets.STREAM_KEY }}
