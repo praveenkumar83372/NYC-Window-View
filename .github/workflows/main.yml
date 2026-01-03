@@ -3,7 +3,7 @@ name: NYC Window View 24-7
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */6 * * *'
+    - cron: '0 */6 * * *' # Automatically restarts every 6 hours to stay live 24/7
 
 jobs:
   stream:
@@ -31,20 +31,24 @@ jobs:
           key = os.environ.get("SUPABASE_KEY")
           supabase = create_client(url, key)
           
+          # Fetch all video URLs from your Supabase 'playlist' table
           response = supabase.table("playlist").select("url").execute()
           
           if not response.data:
-              print("No videos found in database!")
+              print("No videos found in database! Please add one via Telegram first.")
               exit(1)
               
           with open("playlist.txt", "w") as f:
               for row in response.data:
+                  # This format tells FFmpeg to treat the URL as a file input
                   f.write(f"file '{row['url']}'\n")
           EOF
 
       - name: 4. The 2026 "Vertical Master" FFmpeg Command
         run: |
-          ffmpeg -re -f concat -safe 0 -protocol_whitelist file,http,https,tcp,tls -i playlist.txt \
+          # -stream_loop -1 makes the playlist repeat infinitely
+          # -re reads the input at native frame rate (essential for live streaming)
+          ffmpeg -re -stream_loop -1 -f concat -safe 0 -protocol_whitelist file,http,https,tcp,tls -i playlist.txt \
           -vcodec libx264 -preset veryfast -maxrate 3000k -bufsize 6000k \
           -pix_fmt yuv420p -g 60 -vf "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2" \
           -acodec aac -ar 44100 -b:a 128k \
