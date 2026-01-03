@@ -3,7 +3,7 @@ name: NYC Window View 24-7
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */6 * * *' # Automatically restarts every 6 hours to stay live 24/7
+    - cron: '0 */6 * * *' # Automatically restarts every 6 hours for stability
 
 jobs:
   stream:
@@ -40,16 +40,15 @@ jobs:
               
           with open("playlist.txt", "w") as f:
               for row in response.data:
-                  # This format tells FFmpeg to treat the URL as a file input
+                  # This format is required for FFmpeg's concat demuxer
                   f.write(f"file '{row['url']}'\n")
           EOF
 
       - name: 4. The 2026 "Vertical Master" FFmpeg Command
         run: |
-          # -stream_loop -1 makes the playlist repeat infinitely
-          # -re reads the input at native frame rate (essential for live streaming)
+          # Settings optimized for YouTube Live "Snap-to-Live" connection
           ffmpeg -re -stream_loop -1 -f concat -safe 0 -protocol_whitelist file,http,https,tcp,tls -i playlist.txt \
-          -vcodec libx264 -preset veryfast -maxrate 3000k -bufsize 6000k \
+          -vcodec libx264 -preset veryfast -tune zerolatency -b:v 2500k -maxrate 2500k -bufsize 5000k \
           -pix_fmt yuv420p -g 60 -vf "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2" \
           -acodec aac -ar 44100 -b:a 128k \
           -f flv rtmp://a.rtmp.youtube.com/live2/${{ secrets.STREAM_KEY }}
