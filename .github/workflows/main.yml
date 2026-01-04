@@ -1,24 +1,22 @@
-name: NYC Window View 24-7
+name: 24-7 YouTube Live Stream
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 */6 * * *'
 
 jobs:
   stream:
     runs-on: ubuntu-latest
     steps:
-      - name: 1. Checkout Code
+      - name: Checkout
         uses: actions/checkout@v3
 
-      - name: 2. Install FFmpeg
+      - name: Install FFmpeg & dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
           pip install supabase requests
 
-      - name: 3. Build Playlist
+      - name: Fetch playlist from Supabase
         env:
           SUPABASE_URL: "https://ofqbyabbjpincectjdya.supabase.co"
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -26,56 +24,40 @@ jobs:
           python - <<EOF
           import os
           from supabase import create_client
-          url = os.environ.get("SUPABASE_URL")
-          key = os.environ.get("SUPABASE_KEY")
-          supabase = create_client(url, key)
-          response = supabase.table("playlist").select("url").execute()
-          if not response.data:
-              exit(1)
-          with open("list.txt", "w") as f:
-              for row in response.data:
-                  f.write(f"{row['url']}\n")
+          supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
+          res = supabase.table("playlist").select("url").execute()
+          if not res.data: exit(1)
+          with open("list.txt","w") as f:
+            for r in res.data: f.write(r["url"] + "\n")
           EOF
 
-      - name: 4. The 1x Speed High-Bitrate Master
+      - name: Start 24/7 stream
         run: |
-          # 1. BUILD THE BROADCAST CHAIN
-          URLS=$(cat list.txt)
-          INPUTS=""
-          FILTER_PARTS=""
-          CONCAT_MAP=""
-          COUNT=0
-
-          for URL in $URLS; do
-            # -re must be before every -i to force 1x speed reading
-            INPUTS="$INPUTS -re -i $URL"
-            # format=yuv420p is mandatory for YouTube to 'see' the video
-            FILTER_PARTS="$FILTER_PARTS [$COUNT:v]scale=720:1280,format=yuv420p,setsar=1[v$COUNT];"
-            FILTER_PARTS="$FILTER_PARTS [$COUNT:a]aresample=44100:async=1000:min_hard_comp=0.1,pan=stereo|c0=c0|c1=c1[a$COUNT];"
-            CONCAT_MAP="$CONCAT_MAP[v$COUNT][a$COUNT]"
-            COUNT=$((COUNT+1))
-          done
-
-          # 2. THE INFINITE LOOP
           while true; do
-            echo "Starting NYC Stream - Fixing Pixelated Video..."
-            
-            # THE FIXES FOR BROKEN VIDEO:
-            # -b:v 6000k: High enough to make the video clear
-            # -nal-hrd cbr: Forces the constant data YouTube needs to stay live
-            # -preset slow: Uses more CPU power to fix the blurry blocks
-            # -g 60: Sends a Keyframe every 2 seconds so the picture 'refreshes'
-            
+            echo "Starting live stream..."
+            URLS=$(cat list.txt)
+            INPUTS=""
+            FILTERS=""
+            MAP=""
+            i=0
+
+            for URL in $URLS; do
+              INPUTS="$INPUTS -re -i $URL"
+              FILTERS="$FILTERS [$i:v]scale=720:1280,format=yuv420p,setsar=1[v$i];"
+              FILTERS="$FILTERS [$i:a]aresample=44100,pan=stereo|c0=c0|c1=c1[a$i];"
+              MAP="$MAP[v$i][a$i]"
+              i=$((i+1))
+            done
+
             ffmpeg -hide_banner -loglevel warning \
-              -reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 -reconnect_delay_max 5 \
-              $INPUTS -filter_complex "$FILTER_PARTS $CONCAT_MAP concat=n=$COUNT:v=1:a=1[v][a]" \
+              $INPUTS -filter_complex "$FILTERS $MAP concat=n=$i:v=1:a=1[v][a]" \
               -map "[v]" -map "[a]" \
-              -c:v libx264 -preset slow -tune zerolatency \
-              -profile:v high -level 4.2 -pix_fmt yuv420p \
-              -b:v 6000k -maxrate 6000k -minrate 6000k -bufsize 12000k \
-              -nal-hrd cbr -g 60 -c:a aac -ar 44100 -b:a 128k -ac 2 \
+              -c:v libx264 -preset veryfast -tune zerolatency \
+              -profile:v main -level 4.1 -pix_fmt yuv420p \
+              -b:v 4000k -maxrate 4000k -minrate 4000k -bufsize 8000k -nal-hrd cbr -g 30 \
+              -c:a aac -ar 44100 -b:a 128k -ac 2 \
               -f flv rtmp://a.rtmp.youtube.com/live2/${{ secrets.STREAM_KEY }}
-            
-            echo "Stream connection lost. Restarting loop in 5 seconds..."
+
+            echo "Stream stopped. Restarting in 5 seconds..."
             sleep 5
           done
