@@ -12,53 +12,67 @@ jobs:
       - name: 1. Checkout Code
         uses: actions/checkout@v3
 
-      - name: 2. Install FFmpeg
+      - name: 2. Install FFmpeg and Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
           pip install supabase requests
 
-      - name: 3. Build Playlist
+      - name: 3. Download Videos and Build Playlist
         env:
           SUPABASE_URL: "https://ofqbyabbjpincectjdya.supabase.co"
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: |
           python - <<EOF
-          import os
+          import os, requests
           from supabase import create_client
+          
           url = os.environ.get("SUPABASE_URL")
           key = os.environ.get("SUPABASE_KEY")
           supabase = create_client(url, key)
           response = supabase.table("playlist").select("url").execute()
+          
           if not response.data:
+              print("No videos found in Supabase")
               exit(1)
+          
+          os.makedirs("videos", exist_ok=True)
           with open("list.txt", "w") as f:
-              for row in response.data:
-                  f.write(f"file '{row['url']}'\n")
+              for i, row in enumerate(response.data):
+                  video_url = row['url']
+                  local_filename = f"videos/video_{i}.mp4"
+                  print(f"Downloading {video_url}...")
+                  
+                  # Download to local disk to prevent 'Stream ends prematurely'
+                  r = requests.get(video_url, stream=True)
+                  with open(local_filename, 'wb') as vid:
+                      for chunk in r.iter_content(chunk_size=8192):
+                          vid.write(chunk)
+                  
+                  f.write(f"file '{os.path.abspath(local_filename)}'\n")
           EOF
 
-      - name: 4. The Unlocked 1x Stream Master
+      - name: 4. The 1x Speed "Local Disk" Master Stream
         run: |
+          # The while loop ensures that if the playlist ends, it starts again immediately
           while true; do
-            echo "Starting Broadcast: Whitelisting HTTPS & Forcing Video..."
+            echo "Starting NYC Stream from Local Disk (Prevents Corrupt Packets)..."
             
-            # THE CRITICAL FIXES:
-            # 1. -protocol_whitelist: Allows FFmpeg to read HTTPS links from your list.txt
-            # 2. -safe 0: Required to read the long URLs in the playlist
-            # 3. -g 30: Forces a full image refresh every second to stop the grey screen
-            # 4. -b:v 4500k: Fixed high bitrate for a clear picture
+            # THE "STABILITY" FIXES:
+            # 1. Reading from LOCAL list.txt: Removes 'Packet corrupt' from network drops.
+            # 2. -re: Forces 1x speed to match real-time heartbeat.
+            # 3. -stream_loop -1: Tells FFmpeg to loop the entire playlist forever.
+            # 4. -f concat: Glues the local files together seamlessly.
             
             ffmpeg -hide_banner -loglevel warning \
-              -re -protocol_whitelist "file,http,https,tcp,tls" \
-              -f concat -safe 0 -i list.txt \
-              -vcodec libx264 -preset veryfast -tune zerolatency \
+              -re -f concat -safe 0 -stream_loop -1 -i list.txt \
+              -c:v libx264 -preset veryfast -tune zerolatency \
               -profile:v high -level 4.2 -pix_fmt yuv420p \
-              -vf "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2,format=yuv420p" \
               -b:v 4500k -maxrate 4500k -bufsize 9000k \
-              -nal-hrd cbr -g 30 -keyint_min 30 -sc_threshold 0 \
-              -acodec aac -ar 44100 -b:a 128k -ac 2 \
+              -g 60 -keyint_min 60 -sc_threshold 0 \
+              -c:a aac -ar 44100 -b:a 128k -ac 2 \
               -f flv rtmp://a.rtmp.youtube.com/live2/${{ secrets.STREAM_KEY }}
             
-            echo "Stream connection lost. Restarting loop in 5 seconds..."
+            echo "FFmpeg crashed or closed. Restarting in 5 seconds..."
             sleep 5
           done
