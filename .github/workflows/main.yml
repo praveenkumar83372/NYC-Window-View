@@ -12,13 +12,13 @@ jobs:
       - name: 1. Checkout Code
         uses: actions/checkout@v3
 
-      - name: 2. Install FFmpeg and Dependencies
+      - name: 2. Install FFmpeg
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
           pip install supabase requests
 
-      - name: 3. Download Videos and Build Playlist
+      - name: 3. Download and Prepare Seamless Playlist
         env:
           SUPABASE_URL: "https://ofqbyabbjpincectjdya.supabase.co"
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -27,45 +27,49 @@ jobs:
           import os, requests
           from supabase import create_client
           
-          url = os.environ.get("SUPABASE_URL")
-          key = os.environ.get("SUPABASE_KEY")
-          supabase = create_client(url, key)
+          supabase = create_client(os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY"))
           response = supabase.table("playlist").select("url").execute()
           
           if not response.data:
-              print("No videos found in Supabase")
               exit(1)
           
           os.makedirs("videos", exist_ok=True)
-          with open("list.txt", "w") as f:
+          # We create a specific script for the filter complex
+          with open("inputs.txt", "w") as f:
               for i, row in enumerate(response.data):
-                  video_url = row['url']
-                  local_filename = f"videos/video_{i}.mp4"
-                  print(f"Downloading {video_url}...")
-                  
-                  # Download to local disk to prevent 'Stream ends prematurely'
-                  r = requests.get(video_url, stream=True)
-                  with open(local_filename, 'wb') as vid:
+                  local_path = f"videos/vid_{i}.mp4"
+                  r = requests.get(row['url'], stream=True)
+                  with open(local_path, 'wb') as vid:
                       for chunk in r.iter_content(chunk_size=8192):
                           vid.write(chunk)
-                  
-                  f.write(f"file '{os.path.abspath(local_filename)}'\n")
+                  f.write(f"{os.path.abspath(local_path)}\n")
           EOF
 
-      - name: 4. The 1x Speed "Local Disk" Master Stream
+      - name: 4. The 24/7 Seamless Filter Stream
         run: |
-          # The while loop ensures that if the playlist ends, it starts again immediately
+          # Build dynamic filter string to join clips regardless of metadata differences
+          INPUTS=""
+          FILTER=""
+          JOIN=""
+          COUNT=0
+          while read -r line; do
+            INPUTS="$INPUTS -re -i $line"
+            FILTER="$FILTER [$COUNT:v]scale=720:1280,setsar=1,format=yuv420p[v$COUNT]; [$COUNT:a]aresample=44100[a$COUNT];"
+            JOIN="$JOIN [v$COUNT][a$COUNT]"
+            COUNT=$((COUNT+1))
+          done < inputs.txt
+
           while true; do
-            echo "Starting NYC Stream from Local Disk (Prevents Corrupt Packets)..."
+            echo "Starting Seamless NYC Filter Stream..."
             
-            # THE "STABILITY" FIXES:
-            # 1. Reading from LOCAL list.txt: Removes 'Packet corrupt' from network drops.
-            # 2. -re: Forces 1x speed to match real-time heartbeat.
-            # 3. -stream_loop -1: Tells FFmpeg to loop the entire playlist forever.
-            # 4. -f concat: Glues the local files together seamlessly.
+            # THE ULTIMATE FIX:
+            # -filter_complex concat: Decodes and re-stitches every frame to fix 'No start code'
+            # -g 60: Keyframe every 2 seconds for YouTube health
+            # -b:v 4500k: High bitrate for a clear image
             
             ffmpeg -hide_banner -loglevel warning \
-              -re -f concat -safe 0 -stream_loop -1 -i list.txt \
+              $INPUTS -filter_complex "$FILTER $JOIN concat=n=$COUNT:v=1:a=1[v][a]" \
+              -map "[v]" -map "[a]" \
               -c:v libx264 -preset veryfast -tune zerolatency \
               -profile:v high -level 4.2 -pix_fmt yuv420p \
               -b:v 4500k -maxrate 4500k -bufsize 9000k \
@@ -73,6 +77,6 @@ jobs:
               -c:a aac -ar 44100 -b:a 128k -ac 2 \
               -f flv rtmp://a.rtmp.youtube.com/live2/${{ secrets.STREAM_KEY }}
             
-            echo "FFmpeg crashed or closed. Restarting in 5 seconds..."
+            echo "Loop ended. Restarting in 5 seconds..."
             sleep 5
           done
