@@ -18,39 +18,54 @@ jobs:
           sudo apt-get install -y ffmpeg
           pip install supabase requests
 
-      - name: 3. Build Playlist
+      - name: 3. Download Videos Locally
         env:
           SUPABASE_URL: "https://ofqbyabbjpincectjdya.supabase.co"
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: |
           python - <<EOF
           import os
+          import requests
           from supabase import create_client
+          
           url = os.environ.get("SUPABASE_URL")
           key = os.environ.get("SUPABASE_KEY")
           supabase = create_client(url, key)
           response = supabase.table("playlist").select("url").execute()
+          
           if not response.data:
+              print("Playlist empty!")
               exit(1)
+
+          os.makedirs("videos", exist_ok=True)
           with open("playlist.txt", "w") as f:
-              for row in response.data:
-                  f.write(f"file '{row['url']}'\n")
+              for i, row in enumerate(response.data):
+                  video_url = row['url']
+                  local_filename = f"videos/video_{i}.mp4"
+                  print(f"Downloading {video_url} to {local_filename}...")
+                  
+                  # Download file locally to prevent "Stream ends prematurely"
+                  r = requests.get(video_url, stream=True)
+                  with open(local_filename, 'wb') as vid:
+                      for chunk in r.iter_content(chunk_size=8192):
+                          vid.write(chunk)
+                  
+                  f.write(f"file '{local_filename}'\n")
           EOF
 
-      - name: 4. The Corrected 24/7 Command
+      - name: 4. The Stable 24/7 Stream
         run: |
-          # The loop ensures the stream stays alive on the same YouTube link
-          until ffmpeg -re -f concat -safe 0 -stream_loop -1 \
-            -protocol_whitelist "file,http,https,tcp,tls" \
-            -i playlist.txt \
-            -vcodec libx264 -preset veryfast -tune zerolatency -b:v 2500k -maxrate 2500k -bufsize 5000k \
-            -pix_fmt yuv420p -g 60 \
-            -vf "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2,format=yuv420p" \
-            -acodec aac -ar 44100 -b:a 128k -ac 2 \
+          # Use 'until' loop to auto-restart. 
+          # Local files + concat filter = Zero "dorrr dorrr" sound.
+          until ffmpeg -re -f concat -safe 0 -stream_loop -1 -i playlist.txt \
+            -c:v libx264 -preset veryfast -tune zerolatency -b:v 2500k \
+            -maxrate 2500k -bufsize 5000k -g 60 -pix_fmt yuv420p \
+            -vf "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2" \
+            -c:a aac -ar 44100 -b:a 128k -ac 2 \
             -af "aresample=async=1000:min_hard_comp=0.1:first_pts=0" \
-            -fflags +igndts+genpts+nobuffer \
-            -flags +global_header -avoid_negative_ts make_zero \
+            -fflags +igndts+genpts+nobuffer -flags +global_header \
+            -avoid_negative_ts make_zero \
             -f flv rtmp://a.rtmp.youtube.com/live2/${{ secrets.STREAM_KEY }}; do
-            echo "Stream interrupted. Reconnecting in 2 seconds..."
-            sleep 2
+            echo "FFmpeg crashed. Restarting in 3 seconds..."
+            sleep 3
           done
