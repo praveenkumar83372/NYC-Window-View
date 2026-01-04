@@ -1,22 +1,24 @@
-name: 24-7 YouTube Live Stream
+name: NYC Window View 24-7
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '0 */6 * * *'
 
 jobs:
   stream:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: 1. Checkout Code
         uses: actions/checkout@v3
 
-      - name: Install FFmpeg & dependencies
+      - name: 2. Install FFmpeg
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
           pip install supabase requests
 
-      - name: Fetch playlist from Supabase
+      - name: 3. Build Playlist
         env:
           SUPABASE_URL: "https://ofqbyabbjpincectjdya.supabase.co"
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -24,40 +26,41 @@ jobs:
           python - <<EOF
           import os
           from supabase import create_client
-          supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
-          res = supabase.table("playlist").select("url").execute()
-          if not res.data: exit(1)
-          with open("list.txt","w") as f:
-            for r in res.data: f.write(r["url"] + "\n")
+          url = os.environ.get("SUPABASE_URL")
+          key = os.environ.get("SUPABASE_KEY")
+          supabase = create_client(url, key)
+          response = supabase.table("playlist").select("url").execute()
+          if not response.data:
+              exit(1)
+          with open("list.txt", "w") as f:
+              for row in response.data:
+                  # Use the exact format required for the concat demuxer
+                  f.write(f"file '{row['url']}'\n")
           EOF
 
-      - name: Start 24/7 stream
+      - name: 4. The 1x Speed "Force Frame" Master
         run: |
+          # INFINITE LOOP
           while true; do
-            echo "Starting live stream..."
-            URLS=$(cat list.txt)
-            INPUTS=""
-            FILTERS=""
-            MAP=""
-            i=0
-
-            for URL in $URLS; do
-              INPUTS="$INPUTS -re -i $URL"
-              FILTERS="$FILTERS [$i:v]scale=720:1280,format=yuv420p,setsar=1[v$i];"
-              FILTERS="$FILTERS [$i:a]aresample=44100,pan=stereo|c0=c0|c1=c1[a$i];"
-              MAP="$MAP[v$i][a$i]"
-              i=$((i+1))
-            done
-
+            echo "Starting Broadcast: Forcing Keyframes to fix Grey Screen..."
+            
+            # THE "NO GREY" FIXES:
+            # 1. -re: Forces 1x speed to match real-time.
+            # 2. -vcodec libx264 -profile:v main -level 4.1: Max compatibility.
+            # 3. -pix_fmt yuv420p: Standard color format for web players.
+            # 4. -g 30: Forces a new full image EVERY SECOND.
+            # 5. -color_range 1: Forces 'Limited' color range to prevent black/grey washout.
+            
             ffmpeg -hide_banner -loglevel warning \
-              $INPUTS -filter_complex "$FILTERS $MAP concat=n=$i:v=1:a=1[v][a]" \
-              -map "[v]" -map "[a]" \
-              -c:v libx264 -preset veryfast -tune zerolatency \
+              -re -f concat -safe 0 -i list.txt \
+              -vcodec libx264 -preset veryfast -tune zerolatency \
               -profile:v main -level 4.1 -pix_fmt yuv420p \
-              -b:v 4000k -maxrate 4000k -minrate 4000k -bufsize 8000k -nal-hrd cbr -g 30 \
-              -c:a aac -ar 44100 -b:a 128k -ac 2 \
+              -vf "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2,format=yuv420p" \
+              -b:v 4000k -maxrate 4000k -bufsize 8000k \
+              -g 30 -keyint_min 30 -sc_threshold 0 -color_range 1 \
+              -acodec aac -ar 44100 -b:a 128k -ac 2 \
               -f flv rtmp://a.rtmp.youtube.com/live2/${{ secrets.STREAM_KEY }}
-
-            echo "Stream stopped. Restarting in 5 seconds..."
+            
+            echo "Restarting loop in 5 seconds..."
             sleep 5
           done
