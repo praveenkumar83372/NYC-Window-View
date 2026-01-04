@@ -18,7 +18,7 @@ jobs:
           sudo apt-get install -y ffmpeg
           pip install supabase requests
 
-      - name: 3. Download Videos
+      - name: 3. Download and Verify Videos
         env:
           SUPABASE_URL: "https://ofqbyabbjpincectjdya.supabase.co"
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -41,9 +41,9 @@ jobs:
                   f.write(f"{os.path.abspath(path)}\n")
           EOF
 
-      - name: 4. The "No-Zero" Bitrate Stream
+      - name: 4. The 100% Guaranteed Image Stream
         run: |
-          # Build inputs
+          # Build inputs from local files to prevent network drops
           INPUTS=""
           FILTER=""
           JOIN=""
@@ -56,24 +56,24 @@ jobs:
           done < inputs.txt
 
           while true; do
-            echo "Forcing 2500k Bitrate - Fixing Level Limit..."
+            echo "Forcing 2500k Bitrate - Fixing Grey Screen..."
             
-            # THE FIXES:
-            # 1. -b:v 2500k: Matches YouTube's exact recommendation to stop the '0' error
-            # 2. -nal-hrd cbr: Forces Constant Bitrate so the 'pipe' is never empty
-            # 3. -level 3.1: A much safer level that won't trigger the MB limit crash
-            # 4. -g 30: Sends a full image every second to clear the grey screen
+            # THE FIXES FOR GREY SCREEN & 0 BITRATE:
+            # 1. -b:v 2500k: Forces the recommended bitrate to stop the '0' error
+            # 2. -preset ultrafast: Reduces CPU load so the encoder never stalls
+            # 3. -g 30: Sends a full image every second to force the player to show the video
+            # 4. -profile:v baseline: Most basic standard to ensure compatibility
             
             ffmpeg -hide_banner -loglevel warning \
               $INPUTS -filter_complex "$FILTER $JOIN concat=n=$COUNT:v=1:a=1[v][a]" \
               -map "[v]" -map "[a]" \
               -c:v libx264 -preset ultrafast -tune zerolatency \
-              -profile:v main -level 3.1 -pix_fmt yuv420p \
+              -profile:v baseline -level 3.1 -pix_fmt yuv420p \
               -b:v 2500k -maxrate 2500k -minrate 2500k -bufsize 5000k \
               -nal-hrd cbr -g 30 -keyint_min 30 -sc_threshold 0 \
               -c:a aac -ar 44100 -b:a 128k -ac 2 \
               -f flv rtmp://a.rtmp.youtube.com/live2/${{ secrets.STREAM_KEY }}
             
-            echo "Stream restarted. Re-looping..."
+            echo "Stream restarting. Re-looping..."
             sleep 5
           done
