@@ -33,36 +33,35 @@ jobs:
           if not response.data:
               exit(1)
           with open("list.txt", "w") as f:
-              # We add reconnect options DIRECTLY to each file entry for the concat demuxer
-              # This is the secret to 24/7 stability with remote URLs
+              f.write("ffconcat version 1.0\n") # Proper header for concat
               for row in response.data:
                   f.write(f"file '{row['url']}'\n")
           EOF
 
-      - name: 4. The 1x Real-Time Master Stream
+      - name: 4. The 1x Speed "Start Code" Fix
         run: |
-          # Infinite loop ensures the live never ends
+          # Infinite loop to keep the live active 24/7
           while true; do
-            echo "Starting NYC Stream: Enforcing 1x Real-time Speed & High Quality..."
+            echo "Starting NYC Live - Fixing Start Code Errors..."
             
-            # THE FIXES:
-            # 1. Removed -reconnect from global flags (fixes 'Option not found')
-            # 2. Added -re BEFORE -f concat to force 1x speed
-            # 3. Increased bitrate to 4500k and bufsize to 12000k for clear image
-            # 4. Added -x264-params to force a higher level and stop the limit error
+            # THE CRITICAL CHANGES:
+            # 1. -fflags +genpts+igndts: Recalculates timestamps to prevent 'out of order' cuts.
+            # 2. -bsf:v h264_mp4toannexb: Converts MP4 data to a continuous bitstream (Fixes 'No start code').
+            # 3. -readrate 1.0: Strict enforcement of 1x speed.
             
-            ffmpeg -hide_banner -loglevel error \
-              -re -f concat -safe 0 \
+            ffmpeg -hide_banner -loglevel warning -re -readrate 1.0 \
               -protocol_whitelist "file,http,https,tcp,tls" \
-              -i list.txt \
+              -f concat -safe 0 -i list.txt \
+              -bsf:v h264_mp4toannexb \
               -c:v libx264 -preset veryfast -tune zerolatency \
-              -b:v 4500k -maxrate 4500k -bufsize 12000k \
+              -b:v 4500k -maxrate 4500k -bufsize 9000k \
               -profile:v high -level 4.2 -pix_fmt yuv420p -g 60 \
               -vf "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2,format=yuv420p" \
               -c:a aac -ar 44100 -b:a 128k -ac 2 \
               -af "aresample=async=1000:min_hard_comp=0.1:first_pts=0" \
+              -fflags +genpts+igndts+nobuffer \
               -f flv rtmp://a.rtmp.youtube.com/live2/${{ secrets.STREAM_KEY }}
             
-            echo "Stream connection lost or playlist ended. Restarting in 5 seconds..."
-            sleep 5
+            echo "Stream cycled or lost connection. Re-looping in 3 seconds..."
+            sleep 3
           done
