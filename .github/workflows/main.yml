@@ -18,7 +18,7 @@ jobs:
           sudo apt-get install -y ffmpeg
           pip install supabase requests
 
-      - name: 3. Download Videos
+      - name: 3. Download Videos Locally
         env:
           SUPABASE_URL: "https://ofqbyabbjpincectjdya.supabase.co"
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -41,7 +41,7 @@ jobs:
                   f.write(f"{os.path.abspath(path)}\n")
           EOF
 
-      - name: 4. The No-Underflow High Quality Stream
+      - name: 4. The No-Grey High Definition Stream
         run: |
           # Build inputs
           INPUTS=""
@@ -56,24 +56,24 @@ jobs:
           done < inputs.txt
 
           while true; do
-            echo "Starting Stream: Fixing VBV Underflow..."
+            echo "Starting Stream: Forcing Constant Bitrate & High Buffer..."
             
-            # THE FIXES:
-            # 1. -bufsize 10M: Increases the buffer to stop the underflow pixels
-            # 2. -maxrate 2500k: Keeps data steady so YouTube stays live
-            # 3. -preset ultrafast: Reduces CPU stress on the GitHub runner
-            # 4. -g 30: Forces a new image every second to clear grey blocks
+            # THE CRITICAL FIXES:
+            # 1. -bufsize 15M: This is the fix for VBV underflow.
+            # 2. -profile:v baseline -level 3.1: Simplest standard to fix the grey screen.
+            # 3. -g 30: Forces a new full image every 1 second to clear any freezes.
+            # 4. -b:v 2500k: Fixed bitrate ensures data is always flowing.
             
             ffmpeg -hide_banner -loglevel warning \
               $INPUTS -filter_complex "$FILTER $JOIN concat=n=$COUNT:v=1:a=1[v][a]" \
               -map "[v]" -map "[a]" \
               -c:v libx264 -preset ultrafast -tune zerolatency \
-              -profile:v main -level 3.1 -pix_fmt yuv420p \
-              -b:v 2500k -maxrate 2500k -minrate 2500k -bufsize 10M \
+              -profile:v baseline -level 3.1 -pix_fmt yuv420p \
+              -b:v 2500k -maxrate 2500k -minrate 2500k -bufsize 15M \
               -nal-hrd cbr -g 30 -keyint_min 30 -sc_threshold 0 \
               -c:a aac -ar 44100 -b:a 128k -ac 2 \
               -f flv rtmp://a.rtmp.youtube.com/live2/${{ secrets.STREAM_KEY }}
             
-            echo "Restarting loop..."
+            echo "Loop restarting in 5 seconds..."
             sleep 5
           done
