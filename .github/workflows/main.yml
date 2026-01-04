@@ -18,7 +18,7 @@ jobs:
           sudo apt-get install -y ffmpeg
           pip install supabase requests
 
-      - name: 3. Download and Prepare Seamless Playlist
+      - name: 3. Download Videos
         env:
           SUPABASE_URL: "https://ofqbyabbjpincectjdya.supabase.co"
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -26,28 +26,24 @@ jobs:
           python - <<EOF
           import os, requests
           from supabase import create_client
-          
           supabase = create_client(os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY"))
           response = supabase.table("playlist").select("url").execute()
-          
           if not response.data:
               exit(1)
-          
           os.makedirs("videos", exist_ok=True)
-          # We create a specific script for the filter complex
           with open("inputs.txt", "w") as f:
               for i, row in enumerate(response.data):
-                  local_path = f"videos/vid_{i}.mp4"
+                  path = f"videos/vid_{i}.mp4"
                   r = requests.get(row['url'], stream=True)
-                  with open(local_path, 'wb') as vid:
+                  with open(path, 'wb') as v:
                       for chunk in r.iter_content(chunk_size=8192):
-                          vid.write(chunk)
-                  f.write(f"{os.path.abspath(local_path)}\n")
+                          v.write(chunk)
+                  f.write(f"{os.path.abspath(path)}\n")
           EOF
 
-      - name: 4. The 24/7 Seamless Filter Stream
+      - name: 4. The "No-Zero" Bitrate Stream
         run: |
-          # Build dynamic filter string to join clips regardless of metadata differences
+          # Build inputs
           INPUTS=""
           FILTER=""
           JOIN=""
@@ -60,23 +56,24 @@ jobs:
           done < inputs.txt
 
           while true; do
-            echo "Starting Seamless NYC Filter Stream..."
+            echo "Forcing 2500k Bitrate - Fixing Level Limit..."
             
-            # THE ULTIMATE FIX:
-            # -filter_complex concat: Decodes and re-stitches every frame to fix 'No start code'
-            # -g 60: Keyframe every 2 seconds for YouTube health
-            # -b:v 4500k: High bitrate for a clear image
+            # THE FIXES:
+            # 1. -b:v 2500k: Matches YouTube's exact recommendation to stop the '0' error
+            # 2. -nal-hrd cbr: Forces Constant Bitrate so the 'pipe' is never empty
+            # 3. -level 3.1: A much safer level that won't trigger the MB limit crash
+            # 4. -g 30: Sends a full image every second to clear the grey screen
             
             ffmpeg -hide_banner -loglevel warning \
               $INPUTS -filter_complex "$FILTER $JOIN concat=n=$COUNT:v=1:a=1[v][a]" \
               -map "[v]" -map "[a]" \
-              -c:v libx264 -preset veryfast -tune zerolatency \
-              -profile:v high -level 4.2 -pix_fmt yuv420p \
-              -b:v 4500k -maxrate 4500k -bufsize 9000k \
-              -g 60 -keyint_min 60 -sc_threshold 0 \
+              -c:v libx264 -preset ultrafast -tune zerolatency \
+              -profile:v main -level 3.1 -pix_fmt yuv420p \
+              -b:v 2500k -maxrate 2500k -minrate 2500k -bufsize 5000k \
+              -nal-hrd cbr -g 30 -keyint_min 30 -sc_threshold 0 \
               -c:a aac -ar 44100 -b:a 128k -ac 2 \
               -f flv rtmp://a.rtmp.youtube.com/live2/${{ secrets.STREAM_KEY }}
             
-            echo "Loop ended. Restarting in 5 seconds..."
+            echo "Stream restarted. Re-looping..."
             sleep 5
           done
