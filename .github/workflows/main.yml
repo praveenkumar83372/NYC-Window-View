@@ -3,7 +3,7 @@ name: NYC Window View 24-7
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */6 * * *'
+    - cron: '0 */6 * * *' # Restarts every 6 hours; YouTube will stay on the same live.
 
 jobs:
   stream:
@@ -37,16 +37,21 @@ jobs:
                   f.write(f"file '{row['url']}'\n")
           EOF
 
-      - name: 4. The 2026 "Zero-Buzz" Master Command
+      - name: 4. The 24/7 "No-Buzz" Command
         run: |
-          # THE FIX: 
-          # 1. -fflags +igndts+genpts: Ignores the broken timestamps from the files.
-          # 2. aresample=async=1:min_hard_comp=0.1: This kills the buzzing by dropping bad audio packets.
-          # 3. -shortest: Ensures the stream doesn't hang at the end of a video.
-          ffmpeg -re -stream_loop -1 -f concat -safe 0 -protocol_whitelist file,http,https,tcp,tls -i playlist.txt \
-          -vcodec libx264 -preset veryfast -tune zerolatency -b:v 2500k -maxrate 2500k -bufsize 5000k \
-          -pix_fmt yuv420p -g 60 -vf "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2" \
-          -acodec aac -ar 44100 -b:a 128k -ac 2 \
-          -af "aresample=44100:async=1:min_hard_comp=0.1:first_pts=0" \
-          -fflags +igndts+genpts+nobuffer -flags +global_header \
-          -f flv rtmp://a.rtmp.youtube.com/live2/${{ secrets.STREAM_KEY }}
+          # Use a loop to auto-restart on the same stream key if a crash occurs
+          until ffmpeg -re -stream_loop -1 -f concat -safe 0 \
+            -protocol_whitelist "file,http,https,tcp,tls" \
+            -reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 -reconnect_delay_max 5 \
+            -i playlist.txt \
+            -vcodec libx264 -preset veryfast -tune zerolatency -b:v 2500k -maxrate 2500k -bufsize 5000k \
+            -pix_fmt yuv420p -g 60 \
+            -vf "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2,format=yuv420p" \
+            -acodec aac -ar 44100 -b:a 128k -ac 2 \
+            -af "aresample=async=1000:min_hard_comp=0.1:first_pts=0" \
+            -fflags +igndts+genpts+nobuffer \
+            -flags +global_header -avoid_negative_ts make_zero \
+            -f flv rtmp://a.rtmp.youtube.com/live2/${{ secrets.STREAM_KEY }}; do
+            echo "Stream interrupted. Reconnecting to same live in 2 seconds..."
+            sleep 2
+          done
