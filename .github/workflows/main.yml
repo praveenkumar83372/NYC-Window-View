@@ -41,9 +41,9 @@ jobs:
                   f.write(f"{os.path.abspath(path)}\n")
           EOF
 
-      - name: 4. The No-Grey High Definition Stream
+      - name: 4. The Crystal Clear 1x Stream
         run: |
-          # Build inputs
+          # Build inputs from local files to prevent network drops
           INPUTS=""
           FILTER=""
           JOIN=""
@@ -56,24 +56,24 @@ jobs:
           done < inputs.txt
 
           while true; do
-            echo "Starting Stream: Forcing Constant Bitrate & High Buffer..."
+            echo "Starting Broadcast: Forcing High Buffer to Fix Grey Screen..."
             
             # THE CRITICAL FIXES:
-            # 1. -bufsize 15M: This is the fix for VBV underflow.
-            # 2. -profile:v baseline -level 3.1: Simplest standard to fix the grey screen.
-            # 3. -g 30: Forces a new full image every 1 second to clear any freezes.
-            # 4. -b:v 2500k: Fixed bitrate ensures data is always flowing.
+            # 1. -bufsize 20M: Massive buffer to stop VBV underflow pixels.
+            # 2. -preset ultrafast: Reduces CPU load so the encoder never stalls.
+            # 3. -g 30: Forces a new full image EVERY SECOND to clear frozen frames.
+            # 4. -b:v 3000k: Higher bitrate for clear NYC details.
             
             ffmpeg -hide_banner -loglevel warning \
               $INPUTS -filter_complex "$FILTER $JOIN concat=n=$COUNT:v=1:a=1[v][a]" \
               -map "[v]" -map "[a]" \
               -c:v libx264 -preset ultrafast -tune zerolatency \
               -profile:v baseline -level 3.1 -pix_fmt yuv420p \
-              -b:v 2500k -maxrate 2500k -minrate 2500k -bufsize 15M \
+              -b:v 3000k -maxrate 3000k -minrate 3000k -bufsize 20M \
               -nal-hrd cbr -g 30 -keyint_min 30 -sc_threshold 0 \
               -c:a aac -ar 44100 -b:a 128k -ac 2 \
               -f flv rtmp://a.rtmp.youtube.com/live2/${{ secrets.STREAM_KEY }}
             
-            echo "Loop restarting in 5 seconds..."
+            echo "Loop ended. Restarting stream..."
             sleep 5
           done
