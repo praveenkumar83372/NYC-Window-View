@@ -37,9 +37,9 @@ jobs:
                   f.write(f"{row['url']}\n")
           EOF
 
-      - name: 4. The Final Zero-Pixel 1x Stream
+      - name: 4. The 1x Speed High-Bitrate Master
         run: |
-          # DYNAMIC FILTER CONSTRUCTION
+          # 1. BUILD THE BROADCAST CHAIN
           URLS=$(cat list.txt)
           INPUTS=""
           FILTER_PARTS=""
@@ -47,23 +47,24 @@ jobs:
           COUNT=0
 
           for URL in $URLS; do
-            # -re forces exactly 1x real-time speed
+            # -re must be before every -i to force 1x speed reading
             INPUTS="$INPUTS -re -i $URL"
-            # Normalize Video and Audio INSIDE complex filter to avoid Exit Code 234
+            # format=yuv420p is mandatory for YouTube to 'see' the video
             FILTER_PARTS="$FILTER_PARTS [$COUNT:v]scale=720:1280,format=yuv420p,setsar=1[v$COUNT];"
             FILTER_PARTS="$FILTER_PARTS [$COUNT:a]aresample=44100:async=1000:min_hard_comp=0.1,pan=stereo|c0=c0|c1=c1[a$COUNT];"
             CONCAT_MAP="$CONCAT_MAP[v$COUNT][a$COUNT]"
             COUNT=$((COUNT+1))
           done
 
+          # 2. THE INFINITE LOOP
           while true; do
-            echo "Starting Ultra-Clear NYC Stream at 1x Speed..."
+            echo "Starting NYC Stream - Fixing Pixelated Video..."
             
-            # THE PIXEL FIXES:
-            # -b:v 5000k / -maxrate 5000k / -minrate 5000k: Forces Constant Bitrate (CBR)
-            # -bufsize 15000k: Huge buffer prevents the 'broken block' pixels (VBV Underflow)
-            # -preset slow: Spends more CPU to make every detail in NYC sharp
-            # -level 4.2: Unlocks high-performance encoding for 720x1280
+            # THE FIXES FOR BROKEN VIDEO:
+            # -b:v 6000k: High enough to make the video clear
+            # -nal-hrd cbr: Forces the constant data YouTube needs to stay live
+            # -preset slow: Uses more CPU power to fix the blurry blocks
+            # -g 60: Sends a Keyframe every 2 seconds so the picture 'refreshes'
             
             ffmpeg -hide_banner -loglevel warning \
               -reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 -reconnect_delay_max 5 \
@@ -71,10 +72,10 @@ jobs:
               -map "[v]" -map "[a]" \
               -c:v libx264 -preset slow -tune zerolatency \
               -profile:v high -level 4.2 -pix_fmt yuv420p \
-              -b:v 5000k -maxrate 5000k -minrate 5000k -bufsize 15000k \
+              -b:v 6000k -maxrate 6000k -minrate 6000k -bufsize 12000k \
               -nal-hrd cbr -g 60 -c:a aac -ar 44100 -b:a 128k -ac 2 \
               -f flv rtmp://a.rtmp.youtube.com/live2/${{ secrets.STREAM_KEY }}
             
-            echo "Playlist cycle finished. Looping back in 5 seconds..."
+            echo "Stream connection lost. Restarting loop in 5 seconds..."
             sleep 5
           done
