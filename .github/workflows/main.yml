@@ -37,39 +37,43 @@ jobs:
                   f.write(f"{row['url']}\n")
           EOF
 
-      - name: 4. Seamless 24/7 Filter Stream
+      - name: 4. The 1x Speed High-Bitrate Master
         run: |
-          # DYNAMICALLY CONSTRUCT INPUTS AND FILTERS
+          # DYNAMIC FILTER BUILD
+          URLS=$(cat list.txt)
           INPUTS=""
-          FILTER_CHAIN=""
+          FILTER_PARTS=""
           CONCAT_MAP=""
           COUNT=0
 
-          while read -r URL; do
-            # -re must be before every input to force 1x speed
+          for URL in $URLS; do
+            # -re forces 1x speed reading
             INPUTS="$INPUTS -re -i $URL"
-            # Normalize every video to identical resolution, aspect ratio, and audio
-            FILTER_CHAIN="$FILTER_CHAIN [$COUNT:v]scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p[v$COUNT];"
-            FILTER_CHAIN="$FILTER_CHAIN [$COUNT:a]aresample=44100,pan=stereo|c0=c0|c1=c1[a$COUNT];"
+            FILTER_PARTS="$FILTER_PARTS [$COUNT:v]scale=720:1280,setsar=1,format=yuv420p[v$COUNT];"
+            FILTER_PARTS="$FILTER_PARTS [$COUNT:a]aresample=44100,pan=stereo|c0=c0|c1=c1[a$COUNT];"
             CONCAT_MAP="$CONCAT_MAP[v$COUNT][a$COUNT]"
             COUNT=$((COUNT+1))
-          done < list.txt
+          done
 
           # THE INFINITE LOOP
           while true; do
-            echo "Starting Seamless 24/7 Stream (Filter Mode)..."
+            echo "Starting 24/7 Stream - Enforcing High Quality..."
             
-            # THE FIX: 
-            # We use filter_complex concat instead of f concat. 
-            # This decodes the videos so 'Start Codes' are never missing.
-            ffmpeg -hide_banner -loglevel warning \
-              $INPUTS -filter_complex "$FILTER_CHAIN $CONCAT_MAP concat=n=$COUNT:v=1:a=1[v][a]" \
+            # THE "CLEAR IMAGE" FIXES:
+            # 1. -b:v 6000k: High bitrate to remove the pixel squares.
+            # 2. -nal-hrd cbr: Forces Constant Bitrate so YouTube doesn't lose the signal.
+            # 3. -preset medium: Uses more CPU to make the image much sharper.
+            # 4. -bufsize 12000k: Stops the VBV Underflow pixels.
+            
+            ffmpeg -hide_banner -loglevel error \
+              $INPUTS -filter_complex "$FILTER_PARTS $CONCAT_MAP concat=n=$COUNT:v=1:a=1[v][a]" \
               -map "[v]" -map "[a]" \
-              -c:v libx264 -preset veryfast -tune zerolatency \
-              -b:v 4500k -maxrate 4500k -bufsize 9000k \
-              -pix_fmt yuv420p -g 60 -c:a aac -ar 44100 -b:a 128k -ac 2 \
+              -c:v libx264 -preset medium -tune zerolatency \
+              -b:v 6000k -maxrate 6000k -bufsize 12000k \
+              -nal-hrd cbr -g 60 -pix_fmt yuv420p \
+              -c:a aac -ar 44100 -b:a 128k -ac 2 \
               -f flv rtmp://a.rtmp.youtube.com/live2/${{ secrets.STREAM_KEY }}
             
-            echo "Playlist ended or connection reset. Restarting in 5 seconds..."
+            echo "Loop restarting in 5 seconds..."
             sleep 5
           done
