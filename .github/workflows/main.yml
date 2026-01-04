@@ -34,46 +34,46 @@ jobs:
               exit(1)
           with open("list.txt", "w") as f:
               for row in response.data:
-                  f.write(f"{row['url']}\n")
+                  f.write(f"file '{row['url']}'\n")
           EOF
 
-      - name: 4. The 1x Speed High-Bitrate Master
+      - name: 4. The Crystal-Clear 1x Stream Master
         run: |
-          # DYNAMIC FILTER BUILD
-          URLS=$(cat list.txt)
+          # DYNAMIC FILTER BUILD (Ensures proper media alignment)
+          URLS=$(cat list.txt | sed "s/file '//" | sed "s/'//")
           INPUTS=""
           FILTER_PARTS=""
           CONCAT_MAP=""
           COUNT=0
 
           for URL in $URLS; do
-            # -re forces 1x speed reading
             INPUTS="$INPUTS -re -i $URL"
-            FILTER_PARTS="$FILTER_PARTS [$COUNT:v]scale=720:1280,setsar=1,format=yuv420p[v$COUNT];"
+            FILTER_PARTS="$FILTER_PARTS [$COUNT:v]scale=720:1280,format=yuv420p,setsar=1[v$COUNT];"
             FILTER_PARTS="$FILTER_PARTS [$COUNT:a]aresample=44100,pan=stereo|c0=c0|c1=c1[a$COUNT];"
             CONCAT_MAP="$CONCAT_MAP[v$COUNT][a$COUNT]"
             COUNT=$((COUNT+1))
           done
 
-          # THE INFINITE LOOP
+          # THE INFINITE RE-ENCODE LOOP
+          # This forces high quality regardless of the source file quality.
           while true; do
-            echo "Starting 24/7 Stream - Enforcing High Quality..."
+            echo "Starting Ultra-HD 1x Speed Stream..."
             
-            # THE "CLEAR IMAGE" FIXES:
-            # 1. -b:v 6000k: High bitrate to remove the pixel squares.
-            # 2. -nal-hrd cbr: Forces Constant Bitrate so YouTube doesn't lose the signal.
-            # 3. -preset medium: Uses more CPU to make the image much sharper.
-            # 4. -bufsize 12000k: Stops the VBV Underflow pixels.
+            # THE "PIXEL FIX" SETTINGS:
+            # 1. -crf 20: This is a high-quality mode. If image is still blurry, lower to 18.
+            # 2. -level 4.2: Forces the encoder to handle high resolutions without crashing.
+            # 3. -bufsize 20M: Provides a huge data 'bank' to prevent pixel squares.
+            # 4. -preset medium: Uses more CPU power to make the image sharp.
             
-            ffmpeg -hide_banner -loglevel error \
+            ffmpeg -hide_banner -loglevel warning \
               $INPUTS -filter_complex "$FILTER_PARTS $CONCAT_MAP concat=n=$COUNT:v=1:a=1[v][a]" \
               -map "[v]" -map "[a]" \
               -c:v libx264 -preset medium -tune zerolatency \
-              -b:v 6000k -maxrate 6000k -bufsize 12000k \
-              -nal-hrd cbr -g 60 -pix_fmt yuv420p \
+              -profile:v high -level 4.2 -pix_fmt yuv420p \
+              -crf 20 -maxrate 6000k -bufsize 20M -g 60 \
               -c:a aac -ar 44100 -b:a 128k -ac 2 \
               -f flv rtmp://a.rtmp.youtube.com/live2/${{ secrets.STREAM_KEY }}
             
-            echo "Loop restarting in 5 seconds..."
+            echo "Looping playlist to keep 24/7 alive..."
             sleep 5
           done
