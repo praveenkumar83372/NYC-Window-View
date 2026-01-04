@@ -3,7 +3,7 @@ name: NYC Window View 24-7
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */6 * * *' # Auto-restarts every 6 hours to stay within GitHub limits
+    - cron: '0 */6 * * *'
 
 jobs:
   stream:
@@ -37,10 +37,9 @@ jobs:
                   f.write(f"{row['url']}\n")
           EOF
 
-      - name: 4. The Crystal HD 1x Master Stream
+      - name: 4. The Final "Zero-Error" 1x Stream
         run: |
-          # 1. PRE-CONSTRUCT THE FILTER
-          # We interleave [v][a] for every input to ensure perfect sync
+          # 1. CONSTRUCT DYNAMIC FILTERS
           URLS=$(cat list.txt)
           INPUTS=""
           FILTER_PARTS=""
@@ -48,23 +47,22 @@ jobs:
           COUNT=0
 
           for URL in $URLS; do
-            # -re BEFORE every -i forces the 1x real-time speed you need
+            # -re must be before every input for 1x speed
             INPUTS="$INPUTS -re -i $URL"
+            # Normalize Video and Audio INSIDE the complex filter to avoid Exit Code 234
             FILTER_PARTS="$FILTER_PARTS [$COUNT:v]scale=720:1280,format=yuv420p,setsar=1[v$COUNT];"
-            FILTER_PARTS="$FILTER_PARTS [$COUNT:a]aresample=44100,pan=stereo|c0=c0|c1=c1[a$COUNT];"
+            FILTER_PARTS="$FILTER_PARTS [$COUNT:a]aresample=44100:async=1000:min_hard_comp=0.1,pan=stereo|c0=c0|c1=c1[a$COUNT];"
             CONCAT_MAP="$CONCAT_MAP[v$COUNT][a$COUNT]"
             COUNT=$((COUNT+1))
           done
 
           # 2. THE INFINITE BROADCAST LOOP
           while true; do
-            echo "Starting Ultra-Clear NYC Stream at 1x Speed..."
+            echo "Starting Ultra-Clear NYC Stream (Fixing Filter Conflict)..."
             
-            # THE CRITICAL QUALITY FIXES:
-            # -b:v 6000k / -minrate 6000k / -maxrate 6000k: Forces Constant Bitrate (CBR) for clear images.
-            # -bufsize 12000k: Prevents the 'broken block' pixels (VBV Underflow).
-            # -preset slow: Spends more CPU to make every detail in NYC sharp.
-            # -level 4.2: Unlocks high-performance encoding for 720x1280.
+            # THE FIX: 
+            # - Removed -af because it conflicts with filter_complex
+            # - Resampling is now handled in FILTER_PARTS above
             
             ffmpeg -hide_banner -loglevel warning \
               -reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 -reconnect_delay_max 5 \
@@ -72,11 +70,10 @@ jobs:
               -map "[v]" -map "[a]" \
               -c:v libx264 -preset slow -tune zerolatency \
               -profile:v high -level 4.2 -pix_fmt yuv420p \
-              -b:v 6000k -maxrate 6000k -minrate 6000k -bufsize 12000k \
+              -b:v 5000k -maxrate 5000k -bufsize 10000k \
               -nal-hrd cbr -g 60 -c:a aac -ar 44100 -b:a 128k -ac 2 \
-              -af "aresample=async=1000:min_hard_comp=0.1" \
               -f flv rtmp://a.rtmp.youtube.com/live2/${{ secrets.STREAM_KEY }}
             
-            echo "Playlist cycle finished or connection reset. Looping back in 5 seconds..."
+            echo "Stream connection reset or playlist finished. Respawning in 5 seconds..."
             sleep 5
           done
