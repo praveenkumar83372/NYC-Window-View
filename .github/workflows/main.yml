@@ -3,7 +3,7 @@ name: NYC Window View 24-7
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */6 * * *'
+    - cron: '0 */6 * * *' # Restarts every 6 hours to prevent GitHub timeout
 
 jobs:
   stream:
@@ -12,68 +12,75 @@ jobs:
       - name: 1. Checkout Code
         uses: actions/checkout@v3
 
-      - name: 2. Install FFmpeg
+      - name: 2. Install FFmpeg & Tools
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
           pip install supabase requests
 
-      - name: 3. Download Videos Locally
+      - name: 3. Start Dynamic Stream Engine
         env:
           SUPABASE_URL: "https://ofqbyabbjpincectjdya.supabase.co"
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          STREAM_KEY: ${{ secrets.STREAM_KEY }}
         run: |
           python - <<EOF
-          import os, requests
+          import os
+          import time
+          import subprocess
+          import requests
           from supabase import create_client
+
+          # Initialize Supabase
           supabase = create_client(os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY"))
-          response = supabase.table("playlist").select("url").execute()
-          if not response.data:
-              exit(1)
-          os.makedirs("videos", exist_ok=True)
-          with open("inputs.txt", "w") as f:
-              for i, row in enumerate(response.data):
-                  path = f"videos/vid_{i}.mp4"
-                  r = requests.get(row['url'], stream=True)
-                  with open(path, 'wb') as v:
-                      for chunk in r.iter_content(chunk_size=8192):
-                          v.write(chunk)
-                  f.write(f"{os.path.abspath(path)}\n")
+          stream_url = f"rtmp://a.rtmp.youtube.com/live2/{os.environ.get('STREAM_KEY')}"
+
+          def get_playlist():
+              """Fetch latest videos from Supabase"""
+              response = supabase.table("playlist").select("url").execute()
+              return [row['url'] for row in response.data] if response.data else []
+
+          def stream_forever():
+              print("🚀 Starting Dynamic NYC Engine...")
+              
+              while True:
+                  urls = get_playlist()
+                  if not urls:
+                      print("⚠️ No videos found. Waiting 30s...")
+                      time.sleep(30)
+                      continue
+
+                  for video_url in urls:
+                      print(f"🎥 Now Streaming: {video_url}")
+                      
+                      # POWERFUL FFmpeg COMMAND:
+                      # -re: Read input at native frame rate (1.0x speed)
+                      # -preset ultrafast: Lowest CPU usage for max stability
+                      # -g 30: Force Keyframe every 1s to stop the grey screen
+                      # -bufsize 20M: Massive buffer to eliminate pixelation
+                      # -flvflags no_duration_filesize: Optimized for 24/7 live
+                      
+                      cmd = [
+                          "ffmpeg", "-hide_banner", "-loglevel", "warning",
+                          "-re", "-i", video_url,
+                          "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
+                          "-profile:v", "baseline", "-level", "3.1", "-pix_fmt", "yuv420p",
+                          "-vf", "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2,format=yuv420p",
+                          "-b:v", "3000k", "-maxrate", "3000k", "-minrate", "3000k", "-bufsize", "20M",
+                          "-nal-hrd", "cbr", "-g", "30", "-keyint_min", "30",
+                          "-c:a", "aac", "-ar", "44100", "-b:a", "128k", "-ac", "2",
+                          "-f", "flv", "-flvflags", "no_duration_filesize", stream_url
+                      ]
+                      
+                      # Execute FFmpeg for the single clip
+                      process = subprocess.Popen(cmd)
+                      process.wait() 
+                      
+                      # Tiny pause between clips to prevent YouTube from cutting the live
+                      time.sleep(1) 
+                  
+                  print("🔄 Playlist finished. Fetching new updates from Supabase...")
+
+          if __name__ == "__main__":
+              stream_forever()
           EOF
-
-      - name: 4. The Crystal Clear 1x Stream
-        run: |
-          # Build inputs from local files to prevent network drops
-          INPUTS=""
-          FILTER=""
-          JOIN=""
-          COUNT=0
-          while read -r line; do
-            INPUTS="$INPUTS -re -i $line"
-            FILTER="$FILTER [$COUNT:v]scale=720:1280,setsar=1,format=yuv420p[v$COUNT]; [$COUNT:a]aresample=44100[a$COUNT];"
-            JOIN="$JOIN [v$COUNT][a$COUNT]"
-            COUNT=$((COUNT+1))
-          done < inputs.txt
-
-          while true; do
-            echo "Starting Broadcast: Forcing High Buffer to Fix Grey Screen..."
-            
-            # THE CRITICAL FIXES:
-            # 1. -bufsize 20M: Massive buffer to stop VBV underflow pixels.
-            # 2. -preset ultrafast: Reduces CPU load so the encoder never stalls.
-            # 3. -g 30: Forces a new full image EVERY SECOND to clear frozen frames.
-            # 4. -b:v 3000k: Higher bitrate for clear NYC details.
-            
-            ffmpeg -hide_banner -loglevel warning \
-              $INPUTS -filter_complex "$FILTER $JOIN concat=n=$COUNT:v=1:a=1[v][a]" \
-              -map "[v]" -map "[a]" \
-              -c:v libx264 -preset ultrafast -tune zerolatency \
-              -profile:v baseline -level 3.1 -pix_fmt yuv420p \
-              -b:v 3000k -maxrate 3000k -minrate 3000k -bufsize 20M \
-              -nal-hrd cbr -g 30 -keyint_min 30 -sc_threshold 0 \
-              -c:a aac -ar 44100 -b:a 128k -ac 2 \
-              -f flv rtmp://a.rtmp.youtube.com/live2/${{ secrets.STREAM_KEY }}
-            
-            echo "Loop ended. Restarting stream..."
-            sleep 5
-          done
