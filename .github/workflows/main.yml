@@ -1,86 +1,71 @@
-name: NYC Window View 24-7
+name: NYC 24-7 Final Stability Engine
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */6 * * *' # Restarts every 6 hours to prevent GitHub timeout
+    - cron: '0 */6 * * *' # Restarts every 6 hours to stay fresh
 
 jobs:
   stream:
     runs-on: ubuntu-latest
     steps:
-      - name: 1. Checkout Code
-        uses: actions/checkout@v3
-
-      - name: 2. Install FFmpeg & Tools
+      - name: 1. Install FFmpeg & Python
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
           pip install supabase requests
 
-      - name: 3. Start Dynamic Stream Engine
+      - name: 2. Start Unstoppable 24/7 Engine
         env:
           SUPABASE_URL: "https://ofqbyabbjpincectjdya.supabase.co"
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           STREAM_KEY: ${{ secrets.STREAM_KEY }}
         run: |
           python - <<EOF
-          import os
-          import time
-          import subprocess
-          import requests
+          import os, time, subprocess, requests
           from supabase import create_client
 
-          # Initialize Supabase
           supabase = create_client(os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY"))
           stream_url = f"rtmp://a.rtmp.youtube.com/live2/{os.environ.get('STREAM_KEY')}"
 
-          def get_playlist():
-              """Fetch latest videos from Supabase"""
-              response = supabase.table("playlist").select("url").execute()
-              return [row['url'] for row in response.data] if response.data else []
+          def get_urls():
+              """Fetch latest video URLs"""
+              try:
+                  response = supabase.table("playlist").select("url").execute()
+                  return [row['url'] for row in response.data] if response.data else []
+              except Exception as e:
+                  print(f"DB Error: {e}")
+                  return []
 
-          def stream_forever():
-              print("🚀 Starting Dynamic NYC Engine...")
-              
-              while True:
-                  urls = get_playlist()
-                  if not urls:
-                      print("⚠️ No videos found. Waiting 30s...")
-                      time.sleep(30)
-                      continue
+          print("🚀 Real Live Engine Starting...")
+          while True:
+              urls = get_urls()
+              if not urls:
+                  time.sleep(30)
+                  continue
 
-                  for video_url in urls:
-                      print(f"🎥 Now Streaming: {video_url}")
-                      
-                      # POWERFUL FFmpeg COMMAND:
-                      # -re: Read input at native frame rate (1.0x speed)
-                      # -preset ultrafast: Lowest CPU usage for max stability
-                      # -g 30: Force Keyframe every 1s to stop the grey screen
-                      # -bufsize 20M: Massive buffer to eliminate pixelation
-                      # -flvflags no_duration_filesize: Optimized for 24/7 live
-                      
-                      cmd = [
-                          "ffmpeg", "-hide_banner", "-loglevel", "warning",
-                          "-re", "-i", video_url,
-                          "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
-                          "-profile:v", "baseline", "-level", "3.1", "-pix_fmt", "yuv420p",
-                          "-vf", "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2,format=yuv420p",
-                          "-b:v", "3000k", "-maxrate", "3000k", "-minrate", "3000k", "-bufsize", "20M",
-                          "-nal-hrd", "cbr", "-g", "30", "-keyint_min", "30",
-                          "-c:a", "aac", "-ar", "44100", "-b:a", "128k", "-ac", "2",
-                          "-f", "flv", "-flvflags", "no_duration_filesize", stream_url
-                      ]
-                      
-                      # Execute FFmpeg for the single clip
-                      process = subprocess.Popen(cmd)
-                      process.wait() 
-                      
-                      # Tiny pause between clips to prevent YouTube from cutting the live
-                      time.sleep(1) 
+              for video_url in urls:
+                  print(f"🎥 Now Streaming: {video_url}")
                   
-                  print("🔄 Playlist finished. Fetching new updates from Supabase...")
-
-          if __name__ == "__main__":
-              stream_forever()
+                  # THE STABILITY FIXES:
+                  # -level 4.1: Supports the 20M buffer without crashing
+                  # -preset ultrafast: Keeps CPU usage very low
+                  # -bufsize 20M: Large buffer prevents pixel squares
+                  # -g 60: Steady keyframe heartbeat for YouTube
+                  
+                  cmd = [
+                      "ffmpeg", "-hide_banner", "-loglevel", "error",
+                      "-re", "-i", video_url,
+                      "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
+                      "-profile:v", "high", "-level", "4.1", "-pix_fmt", "yuv420p",
+                      "-vf", "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2,format=yuv420p",
+                      "-b:v", "3000k", "-maxrate", "3000k", "-minrate", "3000k", "-bufsize", "20M",
+                      "-nal-hrd", "cbr", "-g", "60", "-keyint_min", "60", "-sc_threshold", "0",
+                      "-c:a", "aac", "-ar", "44100", "-b:a", "128k", "-ac", "2",
+                      "-f", "flv", stream_url
+                  ]
+                  
+                  # subprocess.run waits for the video to finish before picking the next one
+                  subprocess.run(cmd)
+                  time.sleep(1) 
           EOF
