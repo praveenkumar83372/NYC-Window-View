@@ -1,9 +1,9 @@
-name: NYC 24-7 Final Stability Engine
+name: NYC 24-7 Infinite Engine
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */6 * * *' # Restarts every 6 hours to stay fresh
+    - cron: '0 */6 * * *' # Essential: Starts a fresh runner every 6 hours
 
 jobs:
   stream:
@@ -15,29 +15,29 @@ jobs:
           sudo apt-get install -y ffmpeg
           pip install supabase requests
 
-      - name: 2. Start Unstoppable 24/7 Engine
+      - name: 2. Start Infinite 24/7 Engine
         env:
           SUPABASE_URL: "https://ofqbyabbjpincectjdya.supabase.co"
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           STREAM_KEY: ${{ secrets.STREAM_KEY }}
         run: |
           python - <<EOF
-          import os, time, subprocess, requests
+          import os, time, subprocess
           from supabase import create_client
 
+          # Initialize Supabase
           supabase = create_client(os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY"))
           stream_url = f"rtmp://a.rtmp.youtube.com/live2/{os.environ.get('STREAM_KEY')}"
 
           def get_urls():
-              """Fetch latest video URLs"""
+              """Sync with Supabase for real-time playlist updates"""
               try:
                   response = supabase.table("playlist").select("url").execute()
                   return [row['url'] for row in response.data] if response.data else []
-              except Exception as e:
-                  print(f"DB Error: {e}")
+              except:
                   return []
 
-          print("🚀 Real Live Engine Starting...")
+          print("🚀 Infinite Engine Active...")
           while True:
               urls = get_urls()
               if not urls:
@@ -45,13 +45,11 @@ jobs:
                   continue
 
               for video_url in urls:
-                  print(f"🎥 Now Streaming: {video_url}")
-                  
-                  # THE STABILITY FIXES:
-                  # -level 4.1: Supports the 20M buffer without crashing
-                  # -preset ultrafast: Keeps CPU usage very low
-                  # -bufsize 20M: Large buffer prevents pixel squares
-                  # -g 60: Steady keyframe heartbeat for YouTube
+                  # STABILITY FIXES:
+                  # -level 4.1: Fixes the 'VBV buffer' crash from your logs
+                  # -preset ultrafast: Ensures the stream stays at 1.0x speed
+                  # -bufsize 15M: Prevents pixelation and VBV underflow
+                  # -g 60: Forces a full image refresh every 2 seconds
                   
                   cmd = [
                       "ffmpeg", "-hide_banner", "-loglevel", "error",
@@ -59,13 +57,11 @@ jobs:
                       "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
                       "-profile:v", "high", "-level", "4.1", "-pix_fmt", "yuv420p",
                       "-vf", "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2,format=yuv420p",
-                      "-b:v", "3000k", "-maxrate", "3000k", "-minrate", "3000k", "-bufsize", "20M",
+                      "-b:v", "3000k", "-maxrate", "3000k", "-minrate", "3000k", "-bufsize", "15M",
                       "-nal-hrd", "cbr", "-g", "60", "-keyint_min", "60", "-sc_threshold", "0",
                       "-c:a", "aac", "-ar", "44100", "-b:a", "128k", "-ac", "2",
                       "-f", "flv", stream_url
                   ]
-                  
-                  # subprocess.run waits for the video to finish before picking the next one
                   subprocess.run(cmd)
-                  time.sleep(1) 
+                  time.sleep(1) # Safety gap between videos
           EOF
