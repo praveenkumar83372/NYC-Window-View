@@ -1,6 +1,5 @@
 import telebot
 import requests
-import os
 
 # 1. YOUR CREDENTIALS
 SUPABASE_URL = "https://ofqbyabbjpincectjdya.supabase.co"
@@ -19,8 +18,8 @@ def handle_walking_video(message):
     video_data = requests.get(file_url).content
     
     # Upload to Supabase Storage
-    file_name = f"{message.video.file_id}.mp4"
-    storage_url = f"{SUPABASE_URL}/storage/v1/object/nyc-videos/shorts/{file_name}"
+    file_path = f"shorts/{message.video.file_id}.mp4"
+    storage_url = f"{SUPABASE_URL}/storage/v1/object/nyc-videos/{file_path}"
     
     headers = {
         "Authorization": f"Bearer {SUPABASE_KEY}",
@@ -31,15 +30,11 @@ def handle_walking_video(message):
     upload_res = requests.post(storage_url, headers=headers, data=video_data)
     
     if upload_res.status_code == 200:
-        public_url = f"{SUPABASE_URL}/storage/v1/object/public/nyc-videos/shorts/{file_name}"
-        
+        public_url = f"{SUPABASE_URL}/storage/v1/object/public/nyc-videos/{file_path}"
         # Save link to the 'playlist' table
-        db_url = f"{SUPABASE_URL}/rest/v1/playlist"
-        requests.post(db_url, headers=headers, json={"url": public_url})
-        
-        bot.reply_to(message, "✅ Successfully added to the Walking Playlist!")
+        requests.post(f"{SUPABASE_URL}/rest/v1/playlist", headers=headers, json={"url": public_url})
+        bot.reply_to(message, "✅ Walking tour synced to cloud!")
     else:
         bot.reply_to(message, f"❌ Error: {upload_res.text}")
 
-print("NYC Walking Bot is listening...")
 bot.polling()
