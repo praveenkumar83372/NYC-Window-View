@@ -9,6 +9,7 @@ serve(async (req) => {
   try {
     const { message } = await req.json()
 
+    // Only process if the Telegram message contains a video
     if (message?.video) {
       const fileId = message.video.file_id
       const chatId = message.chat.id
@@ -17,13 +18,13 @@ serve(async (req) => {
       const fileRes = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getFile?file_id=${fileId}`)
       const { result } = await fileRes.json()
       
-      if (!result?.file_path) throw new Error("Could not get file path")
+      if (!result?.file_path) throw new Error("Could not get file path from Telegram")
 
-      // 2. Download Video
+      // 2. Download Video from Telegram
       const videoRes = await fetch(`https://api.telegram.org/file/bot${BOT_TOKEN}/${result.file_path}`)
       const videoBlob = await videoRes.blob()
 
-      // 3. Upload to Supabase Storage (Service Role Key required for bypass)
+      // 3. Upload to Supabase Storage
       const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
       const storagePath = `shorts/${fileId}.mp4`
       
@@ -33,22 +34,22 @@ serve(async (req) => {
 
       if (uploadError) throw uploadError
 
-      // 4. Get Public URL and Insert into Playlist Table
+      // 4. Generate Public URL and add to Playlist Database
       const { data: { publicUrl } } = supabase.storage.from('nyc-videos').getPublicUrl(storagePath)
       await supabase.from('playlist').insert({ url: publicUrl })
 
-      // 5. Success Reply
+      // 5. Success Notification
       await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           chat_id: chatId, 
-          text: "🗽 Walking Engine: Video synced to cloud. It will stream at the next Peak Time!" 
+          text: "🗽 NYC Engine: Video synced to cloud. It will go live at the next Peak Window!" 
         })
       })
     }
   } catch (err) {
-    console.error(err)
+    console.error("Function Error:", err)
   }
 
   return new Response(JSON.stringify({ ok: true }), { headers: { "Content-Type": "application/json" } })
