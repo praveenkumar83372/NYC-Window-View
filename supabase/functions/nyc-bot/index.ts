@@ -16,9 +16,7 @@ serve(async (req) => {
       const fileRes = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getFile?file_id=${fileId}`)
       const { result } = await fileRes.json()
       
-      if (!result?.file_path) return new Response("No file path", { status: 400 })
-
-      // 2. Download and Upload to Supabase
+      // 2. Download and Upload to Storage
       const videoRes = await fetch(`https://api.telegram.org/file/bot${BOT_TOKEN}/${result.file_path}`)
       const videoBlob = await videoRes.blob()
 
@@ -28,28 +26,19 @@ serve(async (req) => {
       )
       
       const storagePath = `shorts/${fileId}.mp4`
-      const { error: uploadError } = await supabase.storage
-        .from('nyc-videos')
-        .upload(storagePath, videoBlob, { contentType: 'video/mp4', upsert: true })
+      await supabase.storage.from('nyc-videos').upload(storagePath, videoBlob, { contentType: 'video/mp4', upsert: true })
 
-      if (uploadError) throw uploadError
-
-      // 3. Get Public URL and update database
+      // 3. Update Playlist
       const { data: { publicUrl } } = supabase.storage.from('nyc-videos').getPublicUrl(storagePath)
       await supabase.from('playlist').insert({ url: publicUrl })
 
-      // 4. Send confirmation reply
+      // 4. Confirmation Reply
       await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          chat_id: chatId, 
-          text: "🗽 NYC Engine: Video synced! Ready for the 9:16 Center-Crop live." 
-        })
+        body: JSON.stringify({ chat_id: chatId, text: "🗽 NYC Engine: Video synced! It will be cropped to 9:16 and streamed shortly." })
       })
     }
-  } catch (err) {
-    console.error("Function error:", err)
-  }
+  } catch (err) { console.error(err) }
   return new Response(JSON.stringify({ ok: true }))
 })

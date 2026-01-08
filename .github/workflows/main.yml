@@ -3,7 +3,7 @@ name: NYC Walking Peak-Time Streamer
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 13,21 * * *' # America Peak (1PM & 9PM UTC)
+    - cron: '0 13,21 * * *'
 
 jobs:
   stream:
@@ -11,8 +11,7 @@ jobs:
     steps:
       - name: Install FFmpeg & Python
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get update && sudo apt-get install -y ffmpeg
           pip install supabase requests
 
       - name: Center-Crop & Stream 9:16
@@ -24,43 +23,23 @@ jobs:
           TG_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           python - <<EOF
-          import os, time, subprocess, requests
+          import os, subprocess, requests
           from supabase import create_client
-
           supabase = create_client(os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY"))
           stream_url = f"rtmp://a.rtmp.youtube.com/live2/{os.environ.get('STREAM_KEY')}"
           
-          def send_tg(msg):
-              requests.post(f"https://api.telegram.org/bot{os.environ.get('TG_TOKEN')}/sendMessage", 
-                            data={"chat_id": os.environ.get('TG_CHAT_ID'), "text": msg})
-
-          # 1. Fetch newest video
+          # Fetch newest walking video
           res = supabase.table("playlist").select("url").order("id", desc=True).limit(1).execute()
-          if not res.data:
-              send_tg("⚠️ No videos in playlist queue.")
-              exit(0)
-          
-          video_url = res.data[0]['url']
-          local_file = "current_walk.mp4"
-
-          # 2. Stable Download
-          r = requests.get(video_url, stream=True)
-          with open(local_file, 'wb') as f:
-              for chunk in r.iter_content(chunk_size=8192): f.write(chunk)
-
-          # 3. Stream with 9:16 Center-Crop
-          cmd = [
-              "ffmpeg", "-re", "-i", local_file,
-              "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
-              "-vf", "crop=ih*9/16:ih,scale=720:1280,format=yuv420p",
-              "-b:v", "3500k", "-maxrate", "3500k", "-bufsize", "14M",
-              "-g", "60", "-c:a", "aac", "-b:a", "128k", "-f", "flv", stream_url
-          ]
-          
-          send_tg("✅ NYC Engine: Peak Live is STARTING!")
-          subprocess.run(cmd)
-          
-          # 4. Clean up Database
-          supabase.table("playlist").delete().eq("url", video_url).execute()
-          send_tg("🏁 NYC Engine: Stream finished.")
+          if res.data:
+              video_url = res.data[0]['url']
+              r = requests.get(video_url, stream=True)
+              with open("walk.mp4", 'wb') as f:
+                  for chunk in r.iter_content(chunk_size=8192): f.write(chunk)
+              
+              # CROP LOGIC: Extracts center 9:16 from 16:9
+              cmd = ["ffmpeg", "-re", "-i", "walk.mp4", "-vf", "crop=ih*9/16:ih,scale=720:1280,format=yuv420p", "-c:v", "libx264", "-preset", "ultrafast", "-b:v", "3500k", "-f", "flv", stream_url]
+              subprocess.run(cmd)
+              
+              # Delete from playlist after streaming
+              supabase.table("playlist").delete().eq("url", video_url).execute()
           EOF
