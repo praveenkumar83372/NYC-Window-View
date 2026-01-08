@@ -3,19 +3,19 @@ name: NYC Walking Peak-Time Streamer
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 13,21 * * *' # America Active Peak (1PM & 9PM UTC)
+    - cron: '0 13,21 * * *' # America Peak (1PM & 9PM UTC)
 
 jobs:
   stream:
     runs-on: ubuntu-latest
     steps:
-      - name: 1. Install FFmpeg & Python
+      - name: Install FFmpeg & Python
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
           pip install supabase requests
 
-      - name: 2. Center-Crop & Stream Walking Video
+      - name: Center-Crop & Stream 9:16
         env:
           SUPABASE_URL: "https://ofqbyabbjpincectjdya.supabase.co"
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -37,31 +37,30 @@ jobs:
           # 1. Fetch newest video
           res = supabase.table("playlist").select("url").order("id", desc=True).limit(1).execute()
           if not res.data:
-              send_tg("⚠️ NYC Engine: No walking videos in queue.")
+              send_tg("⚠️ No videos in playlist queue.")
               exit(0)
           
           video_url = res.data[0]['url']
           local_file = "current_walk.mp4"
 
-          # 2. Local Download
+          # 2. Stable Download
           r = requests.get(video_url, stream=True)
           with open(local_file, 'wb') as f:
               for chunk in r.iter_content(chunk_size=8192): f.write(chunk)
 
-          # 3. 9:16 Center-Crop Stream
+          # 3. Stream with 9:16 Center-Crop
           cmd = [
               "ffmpeg", "-re", "-i", local_file,
               "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
-              "-profile:v", "high", "-level", "4.1", "-pix_fmt", "yuv420p",
               "-vf", "crop=ih*9/16:ih,scale=720:1280,format=yuv420p",
               "-b:v", "3500k", "-maxrate", "3500k", "-bufsize", "14M",
               "-g", "60", "-c:a", "aac", "-b:a", "128k", "-f", "flv", stream_url
           ]
           
-          send_tg("✅ NYC Engine: Vertical Peak Live Starting!")
+          send_tg("✅ NYC Engine: Peak Live is STARTING!")
           subprocess.run(cmd)
           
-          # 4. Clean up
+          # 4. Clean up Database
           supabase.table("playlist").delete().eq("url", video_url).execute()
           send_tg("🏁 NYC Engine: Stream finished.")
           EOF
