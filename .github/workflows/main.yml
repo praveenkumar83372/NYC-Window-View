@@ -1,13 +1,14 @@
-name: NYC 24-7 Shielded Engine
+name: NYC 12hr Seamless Shield
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */6 * * *' # Cycles runners every 6 hours
+    - cron: '0 0 * * *' # Restarts every 24 hours to stay under the 12hr archive limit
 
 jobs:
   stream:
     runs-on: ubuntu-latest
+    timeout-minutes: 715 # 11 hours and 55 minutes to guarantee replay
     steps:
       - name: 1. Install FFmpeg & Python
         run: |
@@ -15,7 +16,7 @@ jobs:
           sudo apt-get install -y ffmpeg
           pip install supabase requests
 
-      - name: 2. Start Shielded 24/7 Engine
+      - name: 2. Start Seamless 24/7 Engine
         env:
           SUPABASE_URL: "https://ofqbyabbjpincectjdya.supabase.co"
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -27,56 +28,49 @@ jobs:
 
           supabase = create_client(os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY"))
           stream_url = f"rtmp://a.rtmp.youtube.com/live2/{os.environ.get('STREAM_KEY')}"
+          
+          # Timer to stop at 11:55:00 for the archive
+          start_time = time.time()
+          limit_seconds = (11 * 3600) + (55 * 60)
 
-          def get_urls():
-              try:
-                  response = supabase.table("playlist").select("url").execute()
-                  return [row['url'] for row in response.data] if response.data else []
-              except Exception as e:
-                  print(f"DB Error: {e}")
-                  return []
+          def download_playlist():
+              """Download all current videos locally to prevent 'Broken Pipe' errors"""
+              response = supabase.table("playlist").select("url").execute()
+              urls = [row['url'] for row in response.data] if response.data else []
+              
+              if not os.path.exists('videos'): os.makedirs('videos')
+              
+              with open("list.txt", "w") as f:
+                  for i, url in enumerate(urls):
+                      local_path = f"videos/vid_{i}.mp4"
+                      r = requests.get(url, stream=True)
+                      with open(local_path, 'wb') as vid:
+                          for chunk in r.iter_content(chunk_size=8192): vid.write(chunk)
+                      f.write(f"file '{os.path.abspath(local_path)}'\n")
+              return len(urls)
 
-          print("🚀 Shielded Engine Starting...")
-          while True:
-              urls = get_urls()
-              if not urls:
-                  time.sleep(30)
-                  continue
+          print("🚀 Downloading NYC Library...")
+          count = download_playlist()
 
-              for video_url in urls:
-                  local_filename = "temp_video.mp4"
-                  print(f"📥 Downloading to local disk: {video_url}")
-                  
-                  # DOWNLOAD TO LOCAL DISK FIRST (Prevents 'Broken pipe')
-                  try:
-                      r = requests.get(video_url, stream=True, timeout=30)
-                      with open(local_filename, 'wb') as f:
-                          for chunk in r.iter_content(chunk_size=8192):
-                              f.write(chunk)
-                  except Exception as e:
-                      print(f"Download failed: {e}")
-                      continue
-
-                  print(f"🎥 Now Streaming from local disk...")
-                  # STABILITY SETTINGS:
-                  # -level 4.1: Supports the buffer without crashing
-                  # -bufsize 14M: Prevents pixelation
-                  # -g 60: Keyframe every 2 seconds for YouTube health
-                  cmd = [
-                      "ffmpeg", "-hide_banner", "-loglevel", "error",
-                      "-re", "-i", local_filename,
-                      "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
-                      "-profile:v", "high", "-level", "4.1", "-pix_fmt", "yuv420p",
-                      "-vf", "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2,format=yuv420p",
-                      "-b:v", "3000k", "-maxrate", "3000k", "-minrate", "3000k", "-bufsize", "14M",
-                      "-nal-hrd", "cbr", "-g", "60", "-keyint_min", "60", "-sc_threshold", "0",
-                      "-c:a", "aac", "-ar", "44100", "-b:a", "128k", "-ac", "2",
-                      "-f", "flv", stream_url
-                  ]
-                  subprocess.run(cmd)
-                  
-                  if os.path.exists(local_filename):
-                      os.remove(local_filename)
-                  
-                  time.sleep(1) # Gap for YouTube ingest
+          if count > 0:
+              print(f"🎥 Starting Seamless Stream for {count} videos...")
+              # THE "GAPLESS" FIX:
+              # -f concat: FFmpeg treats all videos as ONE long continuous file.
+              # -stream_loop -1: If the playlist ends before 11:55, it loops back to start.
+              # This keeps the YouTube connection alive without a single micro-break.
+              
+              cmd = [
+                  "ffmpeg", "-hide_banner", "-loglevel", "warning",
+                  "-re", "-f", "concat", "-safe", "0", "-stream_loop", "-1", "-i", "list.txt",
+                  "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
+                  "-profile:v", "high", "-level", "4.1", "-pix_fmt", "yuv420p",
+                  "-vf", "scale=720:1280,format=yuv420p",
+                  "-b:v", "3000k", "-maxrate", "3000k", "-bufsize", "14M",
+                  "-nal-hrd", "cbr", "-g", "60", "-keyint_min", "60",
+                  "-c:a", "aac", "-ar", "44100", "-b:a", "128k",
+                  "-f", "flv", stream_url
+              ]
+              
+              # Run until the 11h 55m timeout kills the job
+              subprocess.run(cmd, timeout=limit_seconds)
           EOF
