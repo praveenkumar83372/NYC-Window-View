@@ -3,19 +3,19 @@ name: NYC Walking Peak-Time Streamer
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 13,21 * * *' # America Active Peak: 1PM & 9PM UTC
+    - cron: '0 13,21 * * *' # America Active Peak (1PM & 9PM UTC)
 
 jobs:
   stream:
     runs-on: ubuntu-latest
     steps:
-      - name: Install FFmpeg & Python
+      - name: 1. Install FFmpeg & Python
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
           pip install supabase requests
 
-      - name: Process & Stream Vertical Walking Live
+      - name: 2. Center-Crop & Stream Walking Video
         env:
           SUPABASE_URL: "https://ofqbyabbjpincectjdya.supabase.co"
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -34,21 +34,21 @@ jobs:
               requests.post(f"https://api.telegram.org/bot{os.environ.get('TG_TOKEN')}/sendMessage", 
                             data={"chat_id": os.environ.get('TG_CHAT_ID'), "text": msg})
 
-          # 1. Fetch latest walking tour
+          # 1. Fetch newest video
           res = supabase.table("playlist").select("url").order("id", desc=True).limit(1).execute()
           if not res.data:
-              send_tg("⚠️ NYC Engine: Playlist empty.")
+              send_tg("⚠️ NYC Engine: No walking videos in queue.")
               exit(0)
           
           video_url = res.data[0]['url']
           local_file = "current_walk.mp4"
 
-          # 2. Stable Download
+          # 2. Local Download
           r = requests.get(video_url, stream=True)
           with open(local_file, 'wb') as f:
               for chunk in r.iter_content(chunk_size=8192): f.write(chunk)
 
-          # 3. 9:16 Center-Crop Logic
+          # 3. 9:16 Center-Crop Stream
           cmd = [
               "ffmpeg", "-re", "-i", local_file,
               "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
@@ -58,7 +58,7 @@ jobs:
               "-g", "60", "-c:a", "aac", "-b:a", "128k", "-f", "flv", stream_url
           ]
           
-          send_tg("✅ NYC Engine: Vertical Peak Live is STARTING!")
+          send_tg("✅ NYC Engine: Vertical Peak Live Starting!")
           subprocess.run(cmd)
           
           # 4. Clean up
