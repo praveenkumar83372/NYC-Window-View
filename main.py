@@ -3,14 +3,14 @@ import requests
 
 # 1. YOUR CREDENTIALS
 SUPABASE_URL = "https://ofqbyabbjpincectjdya.supabase.co"
-SUPABASE_KEY = "sb_publishable_y4EN0CeCLGkenpubyf4tcg_8vj4PVcn"  # Use the long 'eyJ...' key
+SUPABASE_KEY = "sb_publishable_y4EN0CeCLGkenpubyf4tcg_8vj4PVcn"
 BOT_TOKEN = "8388212435:AAHuhQ7XSf4eJKxswzyW0yk5ALEYV-x4I7U"
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
 @bot.message_handler(content_types=['video'])
 def handle_video(message):
-    bot.reply_to(message, "🗽 NYC Window View: Sending to Cloud...")
+    bot.reply_to(message, "🗽 NYC Walking Engine: Sending to Cloud...")
     
     # Download from Telegram
     file_info = bot.get_file(message.video.file_id)
@@ -31,16 +31,15 @@ def handle_video(message):
     upload_res = requests.post(storage_url, headers=headers, data=video_data)
     
     if upload_res.status_code == 200:
-        # Get the link we just created
         public_url = f"{SUPABASE_URL}/storage/v1/object/public/nyc-videos/{file_path}"
         
         # Save link to the 'playlist' table
         db_url = f"{SUPABASE_URL}/rest/v1/playlist"
         requests.post(db_url, headers=headers, json={"url": public_url})
         
-        bot.reply_to(message, "✅ Successfully added to the 24/7 loop!")
+        bot.reply_to(message, "✅ Successfully added to the Walking Playlist!")
     else:
         bot.reply_to(message, f"❌ Error: {upload_res.text}")
 
-print("NYC Window View Bot is listening...")
+print("NYC Walking Bot is listening...")
 bot.polling()

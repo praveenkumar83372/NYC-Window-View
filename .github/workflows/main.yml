@@ -1,14 +1,14 @@
-name: NYC Cinematic Vertical Engine
+name: NYC Walking Peak-Time Streamer
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 0 * * *' # Starts daily for the 12hr archive
+    # Runs twice a day at US Peak Times (1PM and 9PM UTC)
+    - cron: '0 13,21 * * *'
 
 jobs:
   stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 715 # 11 hours and 55 minutes
     steps:
       - name: 1. Install FFmpeg & Python
         run: |
@@ -16,11 +16,13 @@ jobs:
           sudo apt-get install -y ffmpeg
           pip install supabase requests
 
-      - name: 2. Start Cinematic 9:16 Engine
+      - name: 2. Process and Stream Walking Playlist
         env:
           SUPABASE_URL: "https://ofqbyabbjpincectjdya.supabase.co"
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           STREAM_KEY: ${{ secrets.STREAM_KEY }}
+          TELEGRAM_BOT_TOKEN: "8388212435:AAHuhQ7XSf4eJKxswzyW0yk5ALEYV-x4I7U"
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           python - <<EOF
           import os, time, subprocess, requests
@@ -28,38 +30,41 @@ jobs:
 
           supabase = create_client(os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY"))
           stream_url = f"rtmp://a.rtmp.youtube.com/live2/{os.environ.get('STREAM_KEY')}"
-          
-          start_time = time.time()
-          limit_seconds = (11 * 3600) + (55 * 60)
+          tg_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+          tg_chat = os.environ.get("TELEGRAM_CHAT_ID")
 
-          def download_assets():
-              """Downloads the 16:9 cinematic videos from Supabase"""
+          def send_tg(msg):
+              url = f"https://api.telegram.org/bot{tg_token}/sendMessage"
+              requests.post(url, data={"chat_id": tg_chat, "text": msg})
+
+          def get_assets():
               response = supabase.table("playlist").select("url").execute()
               urls = [row['url'] for row in response.data] if response.data else []
               
-              if not os.path.exists('videos'): os.makedirs('videos')
+              if not urls:
+                  send_tg("⚠️ NYC Engine: No walking videos found in playlist for this peak session.")
+                  return 0
               
+              if not os.path.exists('videos'): os.makedirs('videos')
               with open("list.txt", "w") as f:
                   for i, url in enumerate(urls):
-                      local_path = f"videos/vid_{i}.mp4"
-                      print(f"📥 Downloading: {url}")
+                      local_path = f"videos/walk_{i}.mp4"
                       r = requests.get(url, stream=True)
                       with open(local_path, 'wb') as vid:
                           for chunk in r.iter_content(chunk_size=8192): vid.write(chunk)
                       f.write(f"file '{os.path.abspath(local_path)}'\n")
               return len(urls)
 
-          count = download_assets()
+          count = get_assets()
 
           if count > 0:
-              print(f"🎥 Starting 9:16 Center-Crop Stream...")
-              # THE CROP LOGIC:
-              # crop=ih*9/16:ih: Extracts a 9:16 vertical slice from the exact center.
-              # scale=720:1280: Resizes that slice for the YouTube Shorts Live player.
+              send_tg(f"🎥 NYC Engine: Peak-Time Stream Starting with {count} walking clips.")
               
+              # THE CENTER CROP & SEQUENTIAL STREAM
+              # No Loop: It plays the Telegram links once and then stops for replay archiving
               cmd = [
                   "ffmpeg", "-hide_banner", "-loglevel", "warning",
-                  "-re", "-f", "concat", "-safe", "0", "-stream_loop", "-1", "-i", "list.txt",
+                  "-re", "-f", "concat", "-safe", "0", "-i", "list.txt",
                   "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
                   "-profile:v", "high", "-level", "4.1", "-pix_fmt", "yuv420p",
                   "-vf", "crop=ih*9/16:ih,scale=720:1280,format=yuv420p",
@@ -69,5 +74,12 @@ jobs:
                   "-f", "flv", stream_url
               ]
               
-              subprocess.run(cmd, timeout=limit_seconds)
+              # Limit to 11h 55m for YouTube Replay limit
+              try:
+                  subprocess.run(cmd, timeout=42900)
+                  # Automatically clear playlist after successful stream
+                  supabase.table("playlist").delete().neq("url", "clear").execute()
+                  send_tg("✅ NYC Engine: Stream finished. Playlist cleared for next session.")
+              except Exception as e:
+                  send_tg(f"❌ NYC Engine: Error during stream: {str(e)}")
           EOF
