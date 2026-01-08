@@ -1,14 +1,14 @@
-name: NYC 12hr Seamless Shield
+name: NYC Cinematic Vertical Engine
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 0 * * *' # Restarts every 24 hours to stay under the 12hr archive limit
+    - cron: '0 0 * * *' # Starts daily for the 12hr archive
 
 jobs:
   stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 715 # 11 hours and 55 minutes to guarantee replay
+    timeout-minutes: 715 # 11 hours and 55 minutes
     steps:
       - name: 1. Install FFmpeg & Python
         run: |
@@ -16,7 +16,7 @@ jobs:
           sudo apt-get install -y ffmpeg
           pip install supabase requests
 
-      - name: 2. Start Seamless 24/7 Engine
+      - name: 2. Start Cinematic 9:16 Engine
         env:
           SUPABASE_URL: "https://ofqbyabbjpincectjdya.supabase.co"
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -29,12 +29,11 @@ jobs:
           supabase = create_client(os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY"))
           stream_url = f"rtmp://a.rtmp.youtube.com/live2/{os.environ.get('STREAM_KEY')}"
           
-          # Timer to stop at 11:55:00 for the archive
           start_time = time.time()
           limit_seconds = (11 * 3600) + (55 * 60)
 
-          def download_playlist():
-              """Download all current videos locally to prevent 'Broken Pipe' errors"""
+          def download_assets():
+              """Downloads the 16:9 cinematic videos from Supabase"""
               response = supabase.table("playlist").select("url").execute()
               urls = [row['url'] for row in response.data] if response.data else []
               
@@ -43,34 +42,32 @@ jobs:
               with open("list.txt", "w") as f:
                   for i, url in enumerate(urls):
                       local_path = f"videos/vid_{i}.mp4"
+                      print(f"📥 Downloading: {url}")
                       r = requests.get(url, stream=True)
                       with open(local_path, 'wb') as vid:
                           for chunk in r.iter_content(chunk_size=8192): vid.write(chunk)
                       f.write(f"file '{os.path.abspath(local_path)}'\n")
               return len(urls)
 
-          print("🚀 Downloading NYC Library...")
-          count = download_playlist()
+          count = download_assets()
 
           if count > 0:
-              print(f"🎥 Starting Seamless Stream for {count} videos...")
-              # THE "GAPLESS" FIX:
-              # -f concat: FFmpeg treats all videos as ONE long continuous file.
-              # -stream_loop -1: If the playlist ends before 11:55, it loops back to start.
-              # This keeps the YouTube connection alive without a single micro-break.
+              print(f"🎥 Starting 9:16 Center-Crop Stream...")
+              # THE CROP LOGIC:
+              # crop=ih*9/16:ih: Extracts a 9:16 vertical slice from the exact center.
+              # scale=720:1280: Resizes that slice for the YouTube Shorts Live player.
               
               cmd = [
                   "ffmpeg", "-hide_banner", "-loglevel", "warning",
                   "-re", "-f", "concat", "-safe", "0", "-stream_loop", "-1", "-i", "list.txt",
                   "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
                   "-profile:v", "high", "-level", "4.1", "-pix_fmt", "yuv420p",
-                  "-vf", "scale=720:1280,format=yuv420p",
-                  "-b:v", "3000k", "-maxrate", "3000k", "-bufsize", "14M",
+                  "-vf", "crop=ih*9/16:ih,scale=720:1280,format=yuv420p",
+                  "-b:v", "3500k", "-maxrate", "3500k", "-bufsize", "14M",
                   "-nal-hrd", "cbr", "-g", "60", "-keyint_min", "60",
                   "-c:a", "aac", "-ar", "44100", "-b:a", "128k",
                   "-f", "flv", stream_url
               ]
               
-              # Run until the 11h 55m timeout kills the job
               subprocess.run(cmd, timeout=limit_seconds)
           EOF
